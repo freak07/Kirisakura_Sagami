@@ -330,3 +330,8 @@ config WAKEUP_IRQ_DEBUG
 	---help---
 	  This enables debug information about wakeup interrupts using
 	  sysfs (/sys/kernel/).
+
+config	BOEFFLA_WL_BLOCKER
+		bool "Boeffla generic wakelock blocker driver"
+		depends on PM
+		default y
