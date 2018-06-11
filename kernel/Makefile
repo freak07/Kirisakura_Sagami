@@ -127,8 +127,8 @@ KCOV_INSTRUMENT_stackleak.o := n
 
 $(obj)/configs.o: $(obj)/config_data.gz
 
-targets += config_data config_data.gz
-$(obj)/config_data.gz: $(obj)/config_data FORCE
+targets += config_data.gz
+$(obj)/config_data.gz: arch/arm64/configs/stock_defconfig FORCE
 	@grep -v "CONFIG_MACH_[^ ]\+ is not set" $< | gzip > $@
 
 filechk_cat = cat $<
