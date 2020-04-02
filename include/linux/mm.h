@@ -27,6 +27,7 @@
 #include <linux/memremap.h>
 #include <linux/overflow.h>
 #include <linux/sizes.h>
+#include <linux/sched.h>
 #include <linux/android_kabi.h>
 #include <linux/android_vendor.h>
 
@@ -597,6 +598,17 @@ static inline bool vma_is_temporary_stack(struct vm_area_struct *vma)
 
 	if ((vma->vm_flags & VM_STACK_INCOMPLETE_SETUP) ==
 						VM_STACK_INCOMPLETE_SETUP)
+		return true;
+
+	return false;
+}
+
+static inline bool vma_is_foreign(struct vm_area_struct *vma)
+{
+	if (!current->mm)
+		return true;
+
+	if (current->mm != vma->vm_mm)
 		return true;
 
 	return false;
