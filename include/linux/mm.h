@@ -553,6 +553,11 @@ struct vm_operations_struct {
 	ANDROID_KABI_RESERVE(4);
 };
 
+static inline bool vma_is_accessible(struct vm_area_struct *vma)
+{
+	return vma->vm_flags & (VM_READ | VM_WRITE | VM_EXEC);
+}
+
 static inline void INIT_VMA(struct vm_area_struct *vma)
 {
 	INIT_LIST_HEAD(&vma->anon_vma_chain);
