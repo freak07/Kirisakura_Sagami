@@ -1641,6 +1641,7 @@ static struct rq *move_queued_task(struct rq *rq, struct rq_flags *rf,
 
 	WRITE_ONCE(p->on_rq, TASK_ON_RQ_MIGRATING);
 	dequeue_task(rq, p, DEQUEUE_NOCLOCK);
+	rq_unpin_lock(rq, rf);
 	if (!(rq->clock_update_flags & RQCF_UPDATED))
 		update_rq_clock(rq);
 	walt_prepare_migrate(p, src_cpu, new_cpu, true);
