@@ -341,6 +341,7 @@ int nl_srv_unregister(tWlanNlModTypes msg_type, nl_srv_msg_callback msg_handler)
 	return 0;
 }
 
+#if 0
 void *nl80211hdr_put(struct sk_buff *skb, uint32_t portid,
 		     uint32_t seq, int flags, uint8_t cmd)
 {
@@ -348,6 +349,7 @@ void *nl80211hdr_put(struct sk_buff *skb, uint32_t portid,
 
 	return genlmsg_put(skb, portid, seq, cld80211_fam, flags, cmd);
 }
+#endif
 
 /**
  * cld80211_fill_data() - API to fill payload to nl message
