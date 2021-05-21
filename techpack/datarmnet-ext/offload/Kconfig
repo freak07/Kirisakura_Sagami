@@ -1,0 +1,10 @@
+#
+# RMNET_OFFLOAD driver
+#
+
+config RMNET_OFFLOAD
+    tristate "Rmnet offload support"
+    default y
+    depends on RMNET_CORE
+    ---help---
+        Offload support for the RmNet driver
