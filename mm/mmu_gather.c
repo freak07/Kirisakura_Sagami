@@ -158,7 +158,7 @@ static void tlb_remove_table_rcu(struct rcu_head *head)
 
 static void tlb_remove_table_free(struct mmu_table_batch *batch)
 {
-	call_rcu_sched(&batch->rcu, tlb_remove_table_rcu);
+	call_rcu(&batch->rcu, tlb_remove_table_rcu);
 }
 
 #else /* !CONFIG_MMU_GATHER_RCU_TABLE_FREE */
