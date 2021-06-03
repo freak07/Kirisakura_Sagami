@@ -2158,7 +2158,7 @@ static void cnss_pci_time_sync_work_hdlr(struct work_struct *work)
 	mutex_lock(&pci_priv->bus_lock);
 	cnss_pci_update_timestamp(pci_priv);
 	mutex_unlock(&pci_priv->bus_lock);
-	schedule_delayed_work(&pci_priv->time_sync_work,
+	queue_delayed_work(system_power_efficient_wq, &pci_priv->time_sync_work,
 			      msecs_to_jiffies(time_sync_period_ms));
 
 runtime_pm_put:
