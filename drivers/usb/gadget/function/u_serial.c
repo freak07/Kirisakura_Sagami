@@ -436,7 +436,7 @@ static void gs_rx_push(struct work_struct *work)
 	 * either it is throttled or there is no more room in flip buffer.
 	 */
 	if (!list_empty(queue) && !tty_throttled(tty))
-		schedule_delayed_work(&port->push, 1);
+		queue_delayed_work(system_power_efficient_wq, &port->push, 1);
 
 	/* If we're still connected, refill the USB RX queue. */
 	if (!disconnect && port->port_usb)
@@ -452,7 +452,7 @@ static void gs_read_complete(struct usb_ep *ep, struct usb_request *req)
 	/* Queue all received data until the tty layer is ready for it. */
 	spin_lock(&port->port_lock);
 	list_add_tail(&req->list, &port->read_queue);
-	schedule_delayed_work(&port->push, 0);
+	queue_delayed_work(system_power_efficient_wq, &port->push, 0);
 	spin_unlock(&port->port_lock);
 }
 
@@ -850,7 +850,7 @@ static void gs_unthrottle(struct tty_struct *tty)
 		 * read queue backs up enough we'll be NAKing OUT packets.
 		 */
 		pr_vdebug("ttyGS%d: unthrottle\n", port->port_num);
-		schedule_delayed_work(&port->push, 0);
+		queue_delayed_work(system_power_efficient_wq, &port->push, 0);
 	}
 	spin_unlock_irqrestore(&port->port_lock, flags);
 }
