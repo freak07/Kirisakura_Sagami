@@ -20,7 +20,7 @@
 #include "bolero-cdc-registers.h"
 #include "bolero-clk-rsc.h"
 
-#define AUTO_SUSPEND_DELAY  50 /* delay in msec */
+#define AUTO_SUSPEND_DELAY  25 /* delay in msec */
 #define TX_MACRO_MAX_OFFSET 0x1000
 
 #define NUM_DECIMATORS 8
