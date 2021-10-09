@@ -21,7 +21,7 @@
 #include "bolero-cdc-registers.h"
 #include "bolero-clk-rsc.h"
 
-#define AUTO_SUSPEND_DELAY  50 /* delay in msec */
+#define AUTO_SUSPEND_DELAY  25 /* delay in msec */
 #define RX_MACRO_RATES (SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |\
 			SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_48000 |\
 			SNDRV_PCM_RATE_96000 | SNDRV_PCM_RATE_192000 |\
