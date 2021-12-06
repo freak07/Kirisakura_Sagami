@@ -5,7 +5,7 @@ echo "Clean Build Directory"
 echo 
 
 #make clean && make mrproper
-#rm -rf ./out_cfi
+rm -rf ./out_cfi
 
 echo
 echo "Issue Build Commands"
@@ -14,11 +14,11 @@ echo
 mkdir -p out_cfi
 export ARCH=arm64
 export SUBARCH=arm64
-BASE_PATH=/home/miles/Android_Build/Clang_Google/linux-x86
+BASE_PATH=/home/miles/Android_Build/CLANG_GOOGLE_STABLE/
 BASE_PATH_GCC=/home/miles/Android_Build/GCC_Google_Arm64
 BASE_PATH_GCC_32=/home/miles/Android_Build/GCC_Google_Arm32
 export DTC_EXT=/home/miles/Downloads/DU_Tools/dtc-aosp
-export CLANG_PATH=$BASE_PATH/clang-r428724/bin
+export CLANG_PATH=$BASE_PATH/linux-x86_google_clang11/bin
 export PATH=${CLANG_PATH}:${PATH}
 
 export CLANG_TRIPLE=aarch64-linux-gnu-
