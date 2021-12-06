@@ -1,0 +1,21 @@
+/*
+ * NOTE: This file has been modified by Sony Corporation.
+ * Modifications are Copyright 2017 Sony Corporation,
+ * and licensed under the license of the file.
+ */
+// SPDX-License-Identifier: GPL-2.0
+/dts-v1/;
+/plugin/;
+
+&electric_1 {
+
+	// This label should cause an error when the overlay
+	// is applied.  There is already a symbol hvac_1
+	// in the base tree
+	hvac_1: hvac-medium-2 {
+		compatible = "ot,hvac-medium";
+		heat-range = < 50 75 >;
+		cool-range = < 60 80 >;
+	};
+
+};
