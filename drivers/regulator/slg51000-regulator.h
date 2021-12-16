@@ -1,9 +1,9 @@
-/* SPDX-License-Identifier: GPL-2.0+ */
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * SLG51000 High PSRR, Multi-Output Regulators
  * Copyright (C) 2019  Dialog Semiconductor
  *
- * Author: Eric Jeong <eric.jeong.opensource@diasemi.com>
+ * Author: Eric Jeong, Dialog Semiconductor
  */
 
 #ifndef __SLG51000_REGISTERS_H__
@@ -133,6 +133,7 @@
 #define SLG51000_LDO1_VSEL                      0x2000
 #define SLG51000_LDO1_MINV                      0x2060
 #define SLG51000_LDO1_MAXV                      0x2061
+#define SLG51000_LDO1_TRIM2                     0x2063
 #define SLG51000_LDO1_MISC1                     0x2064
 #define SLG51000_LDO1_VSEL_ACTUAL               0x2065
 #define SLG51000_LDO1_EVENT                     0x20c0
@@ -141,6 +142,7 @@
 #define SLG51000_LDO2_VSEL                      0x2200
 #define SLG51000_LDO2_MINV                      0x2260
 #define SLG51000_LDO2_MAXV                      0x2261
+#define SLG51000_LDO2_TRIM2                     0x2263
 #define SLG51000_LDO2_MISC1                     0x2264
 #define SLG51000_LDO2_VSEL_ACTUAL               0x2265
 #define SLG51000_LDO2_EVENT                     0x22c0
@@ -149,6 +151,7 @@
 #define SLG51000_LDO3_VSEL                      0x2300
 #define SLG51000_LDO3_MINV                      0x2360
 #define SLG51000_LDO3_MAXV                      0x2361
+#define SLG51000_LDO3_TRIM2                     0x2363
 #define SLG51000_LDO3_CONF1                     0x2364
 #define SLG51000_LDO3_CONF2                     0x2365
 #define SLG51000_LDO3_VSEL_ACTUAL               0x2366
@@ -158,6 +161,7 @@
 #define SLG51000_LDO4_VSEL                      0x2500
 #define SLG51000_LDO4_MINV                      0x2560
 #define SLG51000_LDO4_MAXV                      0x2561
+#define SLG51000_LDO4_TRIM2                     0x2563
 #define SLG51000_LDO4_CONF1                     0x2564
 #define SLG51000_LDO4_CONF2                     0x2565
 #define SLG51000_LDO4_VSEL_ACTUAL               0x2566
@@ -168,6 +172,7 @@
 #define SLG51000_LDO5_MINV                      0x2760
 #define SLG51000_LDO5_MAXV                      0x2761
 #define SLG51000_LDO5_TRIM2                     0x2763
+#define SLG51000_LDO5_TRIM3                     0x2764
 #define SLG51000_LDO5_CONF1                     0x2765
 #define SLG51000_LDO5_CONF2                     0x2766
 #define SLG51000_LDO5_VSEL_ACTUAL               0x2767
@@ -178,6 +183,7 @@
 #define SLG51000_LDO6_MINV                      0x2960
 #define SLG51000_LDO6_MAXV                      0x2961
 #define SLG51000_LDO6_TRIM2                     0x2963
+#define SLG51000_LDO6_TRIM3                     0x2964
 #define SLG51000_LDO6_CONF1                     0x2965
 #define SLG51000_LDO6_CONF2                     0x2966
 #define SLG51000_LDO6_VSEL_ACTUAL               0x2967
@@ -187,6 +193,7 @@
 #define SLG51000_LDO7_VSEL                      0x3100
 #define SLG51000_LDO7_MINV                      0x3160
 #define SLG51000_LDO7_MAXV                      0x3161
+#define SLG51000_LDO7_TRIM2                     0x3163
 #define SLG51000_LDO7_CONF1                     0x3164
 #define SLG51000_LDO7_CONF2                     0x3165
 #define SLG51000_LDO7_VSEL_ACTUAL               0x3166
@@ -195,8 +202,6 @@
 #define SLG51000_LDO7_IRQ_MASK                  0x31c2
 #define SLG51000_OTP_EVENT                      0x782b
 #define SLG51000_OTP_IRQ_MASK                   0x782d
-#define SLG51000_OTP_LOCK_OTP_PROG              0x78fe
-#define SLG51000_OTP_LOCK_CTRL                  0x78ff
 #define SLG51000_LOCK_GLOBAL_LOCK_CTRL1         0x8000
 
 /* Register Bit Fields */
@@ -206,12 +211,12 @@
 #define SLG51000_PATTERN_ID_BYTE0_MASK          (0xff << 0)
 
 /* SLG51000_SYSCTL_PATTERN_ID_BYTE1 = 0x1106 */
-#define SLG51000_PATTERN_ID_BYTE1_SHIFT         0
-#define SLG51000_PATTERN_ID_BYTE1_MASK          (0xff << 0)
+#define SLG51000_PART_NUMBER_BYTE0_SHIFT        0
+#define SLG51000_PART_NUMBER_BYTE0_MASK         (0xff << 0)
 
 /* SLG51000_SYSCTL_PATTERN_ID_BYTE2 = 0x1107 */
-#define SLG51000_PATTERN_ID_BYTE2_SHIFT         0
-#define SLG51000_PATTERN_ID_BYTE2_MASK          (0xff << 0)
+#define SLG51000_PART_NUMBER_BYTE1_SHIFT        0
+#define SLG51000_PART_NUMBER_BYTE1_MASK         (0xff << 0)
 
 /* SLG51000_SYSCTL_SYS_CONF_A = 0x1109 */
 #define SLG51000_I2C_ADDRESS_SHIFT              0
@@ -415,10 +420,6 @@
 #define SLG51000_MAXV_SHIFT                     0
 #define SLG51000_MAXV_MASK                      (0xff << 0)
 
-/* SLG51000_LDO1_MISC1 = 0x2064, SLG51000_LDO2_MISC1 = 0x2264 */
-#define SLG51000_SEL_VRANGE_SHIFT               0
-#define SLG51000_SEL_VRANGE_MASK                (0x01 << 0)
-
 /* SLG51000_LDO1_VSEL_ACTUAL ~ SLG51000_LDO7_VSEL_ACTUAL =
  * 0x2065, 0x2265, 0x2366, 0x2566, 0x2767, 0x2967, 0x3166
  */
@@ -467,6 +468,16 @@
 #define SLG51000_SEL_BYP_MODE_SHIFT             0
 #define SLG51000_SEL_BYP_MODE_MASK              (0x01 << 0)
 
+/* SLG51000_LDO1_TRIM2 = 0x2063, SLG51000_LDO2_TRIM2 = 0x2263,
+ * SLG51000_LDO3_TRIM2 = 0x2363, SLG51000_LDO4_TRIM2 = 0x2563,
+ * SLG51000_LDO5_TRIM3 = 0x2764, SLG51000_LDO6_TRIM3 = 0x2964,
+ * SLG51000_LDO7_TRIM2 = 0x3163
+ */
+#define SLG51000_ILIM_FLAG_DEB_SHIFT            3
+#define SLG51000_ILIM_FLAG_DEB_MASK             (0x03 << 3)
+#define SLG51000_VOUT_OK_DEB_SHIFT              1
+#define SLG51000_VOUT_OK_DEB_MASK               (0x03 << 1)
+
 /* SLG51000_OTP_EVENT = 0x782b */
 #define SLG51000_EVT_CRC_SHIFT                  0
 #define SLG51000_EVT_CRC_MASK                   (0x01 << 0)
@@ -474,16 +485,6 @@
 /* SLG51000_OTP_IRQ_MASK = 0x782d */
 #define SLG51000_IRQ_CRC_SHIFT                  0
 #define SLG51000_IRQ_CRC_MASK                   (0x01 << 0)
-
-/* SLG51000_OTP_LOCK_OTP_PROG = 0x78fe */
-#define SLG51000_LOCK_OTP_PROG_SHIFT            0
-#define SLG51000_LOCK_OTP_PROG_MASK             (0x01 << 0)
-
-/* SLG51000_OTP_LOCK_CTRL = 0x78ff */
-#define SLG51000_LOCK_DFT_SHIFT                 1
-#define SLG51000_LOCK_DFT_MASK                  (0x01 << 1)
-#define SLG51000_LOCK_RWT_SHIFT                 0
-#define SLG51000_LOCK_RWT_MASK                  (0x01 << 0)
 
 /* SLG51000_LOCK_GLOBAL_LOCK_CTRL1 = 0x8000 */
 #define SLG51000_LDO7_LOCK_SHIFT                7

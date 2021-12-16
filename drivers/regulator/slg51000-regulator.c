@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0+
-//
-// SLG51000 High PSRR, Multi-Output Regulators
-// Copyright (C) 2019  Dialog Semiconductor
-//
-// Author: Eric Jeong <eric.jeong.opensource@diasemi.com>
+/*
+ * SLG51000 High PSRR, Multi-Output Regulators
+ * Copyright (C) 2019  Dialog Semiconductor
+ *
+ * Author: Eric Jeong, Dialog Semiconductor
+ */
 
 #include <linux/err.h>
 #include <linux/gpio/consumer.h>
@@ -13,6 +14,7 @@
 #include <linux/irq.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_gpio.h>
 #include <linux/regmap.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
@@ -38,10 +40,10 @@ enum slg51000_regulators {
 struct slg51000 {
 	struct device *dev;
 	struct regmap *regmap;
-	struct regulator_desc *rdesc[SLG51000_MAX_REGULATORS];
+	struct regulator_desc rdesc[SLG51000_MAX_REGULATORS];
 	struct regulator_dev *rdev[SLG51000_MAX_REGULATORS];
-	struct gpio_desc *cs_gpiod;
 	int chip_irq;
+	int chip_cs_pin;
 };
 
 struct slg51000_evt_sta {
@@ -106,37 +108,34 @@ static const struct regmap_range slg51000_readable_ranges[] = {
 			 SLG51000_PWRSEQ_INPUT_SENSE_CONF_B),
 	regmap_reg_range(SLG51000_LDO1_VSEL, SLG51000_LDO1_VSEL),
 	regmap_reg_range(SLG51000_LDO1_MINV, SLG51000_LDO1_MAXV),
-	regmap_reg_range(SLG51000_LDO1_MISC1, SLG51000_LDO1_VSEL_ACTUAL),
+	regmap_reg_range(SLG51000_LDO1_TRIM2, SLG51000_LDO1_VSEL_ACTUAL),
 	regmap_reg_range(SLG51000_LDO1_EVENT, SLG51000_LDO1_IRQ_MASK),
 	regmap_reg_range(SLG51000_LDO2_VSEL, SLG51000_LDO2_VSEL),
 	regmap_reg_range(SLG51000_LDO2_MINV, SLG51000_LDO2_MAXV),
-	regmap_reg_range(SLG51000_LDO2_MISC1, SLG51000_LDO2_VSEL_ACTUAL),
+	regmap_reg_range(SLG51000_LDO2_TRIM2, SLG51000_LDO2_VSEL_ACTUAL),
 	regmap_reg_range(SLG51000_LDO2_EVENT, SLG51000_LDO2_IRQ_MASK),
 	regmap_reg_range(SLG51000_LDO3_VSEL, SLG51000_LDO3_VSEL),
 	regmap_reg_range(SLG51000_LDO3_MINV, SLG51000_LDO3_MAXV),
-	regmap_reg_range(SLG51000_LDO3_CONF1, SLG51000_LDO3_VSEL_ACTUAL),
+	regmap_reg_range(SLG51000_LDO3_TRIM2, SLG51000_LDO3_VSEL_ACTUAL),
 	regmap_reg_range(SLG51000_LDO3_EVENT, SLG51000_LDO3_IRQ_MASK),
 	regmap_reg_range(SLG51000_LDO4_VSEL, SLG51000_LDO4_VSEL),
 	regmap_reg_range(SLG51000_LDO4_MINV, SLG51000_LDO4_MAXV),
-	regmap_reg_range(SLG51000_LDO4_CONF1, SLG51000_LDO4_VSEL_ACTUAL),
+	regmap_reg_range(SLG51000_LDO4_TRIM2, SLG51000_LDO4_VSEL_ACTUAL),
 	regmap_reg_range(SLG51000_LDO4_EVENT, SLG51000_LDO4_IRQ_MASK),
 	regmap_reg_range(SLG51000_LDO5_VSEL, SLG51000_LDO5_VSEL),
 	regmap_reg_range(SLG51000_LDO5_MINV, SLG51000_LDO5_MAXV),
-	regmap_reg_range(SLG51000_LDO5_TRIM2, SLG51000_LDO5_TRIM2),
-	regmap_reg_range(SLG51000_LDO5_CONF1, SLG51000_LDO5_VSEL_ACTUAL),
+	regmap_reg_range(SLG51000_LDO5_TRIM2, SLG51000_LDO5_VSEL_ACTUAL),
 	regmap_reg_range(SLG51000_LDO5_EVENT, SLG51000_LDO5_IRQ_MASK),
 	regmap_reg_range(SLG51000_LDO6_VSEL, SLG51000_LDO6_VSEL),
 	regmap_reg_range(SLG51000_LDO6_MINV, SLG51000_LDO6_MAXV),
-	regmap_reg_range(SLG51000_LDO6_TRIM2, SLG51000_LDO6_TRIM2),
-	regmap_reg_range(SLG51000_LDO6_CONF1, SLG51000_LDO6_VSEL_ACTUAL),
+	regmap_reg_range(SLG51000_LDO6_TRIM2, SLG51000_LDO6_VSEL_ACTUAL),
 	regmap_reg_range(SLG51000_LDO6_EVENT, SLG51000_LDO6_IRQ_MASK),
 	regmap_reg_range(SLG51000_LDO7_VSEL, SLG51000_LDO7_VSEL),
 	regmap_reg_range(SLG51000_LDO7_MINV, SLG51000_LDO7_MAXV),
-	regmap_reg_range(SLG51000_LDO7_CONF1, SLG51000_LDO7_VSEL_ACTUAL),
+	regmap_reg_range(SLG51000_LDO7_TRIM2, SLG51000_LDO7_VSEL_ACTUAL),
 	regmap_reg_range(SLG51000_LDO7_EVENT, SLG51000_LDO7_IRQ_MASK),
 	regmap_reg_range(SLG51000_OTP_EVENT, SLG51000_OTP_EVENT),
 	regmap_reg_range(SLG51000_OTP_IRQ_MASK, SLG51000_OTP_IRQ_MASK),
-	regmap_reg_range(SLG51000_OTP_LOCK_OTP_PROG, SLG51000_OTP_LOCK_CTRL),
 	regmap_reg_range(SLG51000_LOCK_GLOBAL_LOCK_CTRL1,
 			 SLG51000_LOCK_GLOBAL_LOCK_CTRL1),
 };
@@ -178,6 +177,42 @@ static const struct regmap_config slg51000_regmap_config = {
 	.volatile_table = &slg51000_volatile_table,
 };
 
+static int slg51000_get_status(struct regulator_dev *rdev)
+{
+	struct slg51000 *chip = rdev_get_drvdata(rdev);
+	int ret, id = rdev_get_id(rdev);
+	unsigned int status;
+
+	ret = regulator_is_enabled_regmap(rdev);
+	if (ret < 0) {
+		dev_err(chip->dev, "Failed to read enable register(%d)\n",
+			ret);
+		return ret;
+	}
+
+	if (!ret)
+		return REGULATOR_STATUS_OFF;
+
+	ret = regmap_read(chip->regmap, es_reg[id].sreg, &status);
+	if (ret < 0) {
+		dev_err(chip->dev, "Failed to read status register(%d)\n",
+			ret);
+		return ret;
+	}
+
+	if (!(status & SLG51000_STA_ILIM_FLAG_MASK) &&
+	    (status & SLG51000_STA_VOUT_OK_FLAG_MASK)) {
+		if (rdev->desc->n_voltages == 0 &&
+		    (id == SLG51000_REGULATOR_LDO5 ||
+		     id == SLG51000_REGULATOR_LDO6))
+			return REGULATOR_STATUS_BYPASS;
+		else
+			return REGULATOR_STATUS_ON;
+	} else {
+		return REGULATOR_STATUS_ERROR;
+	}
+}
+
 static const struct regulator_ops slg51000_regl_ops = {
 	.enable = regulator_enable_regmap,
 	.disable = regulator_disable_regmap,
@@ -186,12 +221,14 @@ static const struct regulator_ops slg51000_regl_ops = {
 	.map_voltage = regulator_map_voltage_linear,
 	.get_voltage_sel = regulator_get_voltage_sel_regmap,
 	.set_voltage_sel = regulator_set_voltage_sel_regmap,
+	.get_status = slg51000_get_status,
 };
 
 static const struct regulator_ops slg51000_switch_ops = {
 	.enable = regulator_enable_regmap,
 	.disable = regulator_disable_regmap,
 	.is_enabled = regulator_is_enabled_regmap,
+	.get_status = slg51000_get_status,
 };
 
 static int slg51000_of_parse_cb(struct device_node *np,
@@ -213,10 +250,10 @@ static int slg51000_of_parse_cb(struct device_node *np,
 	return 0;
 }
 
-#define SLG51000_REGL_DESC(_id, _name, _s_name, _min, _step) \
+#define SLG51000_REGL_DESC(_id, _name, _s_name, _min, _step)       \
 	[SLG51000_REGULATOR_##_id] = {                             \
 		.name = #_name,                                    \
-		.supply_name = _s_name,				   \
+		.supply_name = _s_name,                            \
 		.id = SLG51000_REGULATOR_##_id,                    \
 		.of_match = of_match_ptr(#_name),                  \
 		.of_parse_cb = slg51000_of_parse_cb,               \
@@ -235,8 +272,8 @@ static int slg51000_of_parse_cb(struct device_node *np,
 	}
 
 static struct regulator_desc regls_desc[SLG51000_MAX_REGULATORS] = {
-	SLG51000_REGL_DESC(LDO1, ldo1, NULL,   2400000,  5000),
-	SLG51000_REGL_DESC(LDO2, ldo2, NULL,   2400000,  5000),
+	SLG51000_REGL_DESC(LDO1, ldo1, NULL,   2200000,  5000),
+	SLG51000_REGL_DESC(LDO2, ldo2, NULL,   2200000,  5000),
 	SLG51000_REGL_DESC(LDO3, ldo3, "vin3", 1200000, 10000),
 	SLG51000_REGL_DESC(LDO4, ldo4, "vin4", 1200000, 10000),
 	SLG51000_REGL_DESC(LDO5, ldo5, "vin5",  400000,  5000),
@@ -257,15 +294,16 @@ static int slg51000_regulator_init(struct slg51000 *chip)
 		SLG51000_LDO7_MINV,
 	};
 
+	memcpy(chip->rdesc, regls_desc,
+		sizeof(struct regulator_desc) * SLG51000_MAX_REGULATORS);
+
 	for (id = 0; id < SLG51000_MAX_REGULATORS; id++) {
-		chip->rdesc[id] = &regls_desc[id];
-		rdesc = chip->rdesc[id];
+		rdesc = &chip->rdesc[id];
 		config.regmap = chip->regmap;
 		config.dev = chip->dev;
 		config.driver_data = chip;
-
 		ret = regmap_bulk_read(chip->regmap, min_regs[id],
-				       vsel_range, 2);
+			vsel_range, 2);
 		if (ret < 0) {
 			dev_err(chip->dev,
 				"Failed to read the MIN register\n");
@@ -273,33 +311,6 @@ static int slg51000_regulator_init(struct slg51000 *chip)
 		}
 
 		switch (id) {
-		case SLG51000_REGULATOR_LDO1:
-		case SLG51000_REGULATOR_LDO2:
-			if (id == SLG51000_REGULATOR_LDO1)
-				reg = SLG51000_LDO1_MISC1;
-			else
-				reg = SLG51000_LDO2_MISC1;
-
-			ret = regmap_read(chip->regmap, reg, &val);
-			if (ret < 0) {
-				dev_err(chip->dev,
-					"Failed to read voltage range of ldo%d\n",
-					id + 1);
-				return ret;
-			}
-
-			rdesc->linear_min_sel = vsel_range[0];
-			rdesc->n_voltages = vsel_range[1] + 1;
-			if (val & SLG51000_SEL_VRANGE_MASK)
-				rdesc->min_uV = SLG51000_LDOHP_HV_MIN
-						+ (vsel_range[0]
-						   * rdesc->uV_step);
-			else
-				rdesc->min_uV = SLG51000_LDOHP_LV_MIN
-						+ (vsel_range[0]
-						   * rdesc->uV_step);
-			break;
-
 		case SLG51000_REGULATOR_LDO5:
 		case SLG51000_REGULATOR_LDO6:
 			if (id == SLG51000_REGULATOR_LDO5)
@@ -338,7 +349,7 @@ static int slg51000_regulator_init(struct slg51000 *chip)
 			ret = PTR_ERR(chip->rdev[id]);
 			dev_err(chip->dev,
 				"Failed to register regulator(%s):%d\n",
-				chip->rdesc[id]->name, ret);
+				chip->rdesc[id].name, ret);
 			return ret;
 		}
 	}
@@ -391,7 +402,8 @@ static irqreturn_t slg51000_irq_handler(int irq, void *data)
 		    (evt[i][R0] & SLG51000_EVT_ILIM_FLAG_MASK)) {
 			regulator_lock(chip->rdev[i]);
 			regulator_notifier_call_chain(chip->rdev[i],
-					    REGULATOR_EVENT_OVER_CURRENT, NULL);
+						REGULATOR_EVENT_OVER_CURRENT,
+						NULL);
 			regulator_unlock(chip->rdev[i]);
 
 			if (evt[i][R1] & SLG51000_STA_ILIM_FLAG_MASK)
@@ -408,7 +420,8 @@ static irqreturn_t slg51000_irq_handler(int irq, void *data)
 			    (evt[i][R1] & SLG51000_STA_VOUT_OK_FLAG_MASK)) {
 				regulator_lock(chip->rdev[i]);
 				regulator_notifier_call_chain(chip->rdev[i],
-					       REGULATOR_EVENT_OVER_TEMP, NULL);
+						REGULATOR_EVENT_OVER_TEMP,
+						NULL);
 				regulator_unlock(chip->rdev[i]);
 			}
 		}
@@ -447,23 +460,41 @@ static int slg51000_i2c_probe(struct i2c_client *client,
 {
 	struct device *dev = &client->dev;
 	struct slg51000 *chip;
-	struct gpio_desc *cs_gpiod;
-	int error, ret;
+	int error, cs_gpio, ret;
+	struct regulator *cs;
 
 	chip = devm_kzalloc(dev, sizeof(struct slg51000), GFP_KERNEL);
 	if (!chip)
 		return -ENOMEM;
 
-	cs_gpiod = devm_gpiod_get_optional(dev, "dlg,cs",
-					   GPIOD_OUT_HIGH |
-						GPIOD_FLAGS_BIT_NONEXCLUSIVE);
-	if (IS_ERR(cs_gpiod))
-		return PTR_ERR(cs_gpiod);
+	cs_gpio = of_get_named_gpio(dev->of_node, "dlg,cs-gpios", 0);
+	if (cs_gpio > 0) {
+		if (!gpio_is_valid(cs_gpio)) {
+			dev_err(dev, "Invalid chip select pin\n");
+			return -EPERM;
+		}
 
-	if (cs_gpiod) {
-		dev_info(dev, "Found chip selector property\n");
-		chip->cs_gpiod = cs_gpiod;
+		ret = devm_gpio_request_one(dev, cs_gpio, GPIOF_OUT_INIT_HIGH,
+					    "slg51000_cs_pin");
+		if (ret) {
+			dev_err(dev, "GPIO(%d) request failed(%d)\n",
+				cs_gpio, ret);
+			return ret;
+		}
+
+		chip->chip_cs_pin = cs_gpio;
 	}
+
+	cs = regulator_get(dev, "cs");
+	if (cs) {
+		ret = regulator_enable(cs);
+		if (ret) {
+			dev_err(dev, "cs enable failed %d\n", ret);
+			return ret;
+		}
+	}
+
+	usleep_range(10000, 10000);
 
 	i2c_set_clientdata(client, chip);
 	chip->chip_irq = client->irq;
@@ -496,7 +527,26 @@ static int slg51000_i2c_probe(struct i2c_client *client,
 			return ret;
 		}
 	} else {
-		dev_info(dev, "No IRQ configured\n");
+		dev_warn(dev, "No IRQ configured\n");
+	}
+
+	if (cs) {
+		(void)regulator_disable(cs);
+		regulator_put(cs);
+	}
+
+	return ret;
+}
+
+static int slg51000_i2c_remove(struct i2c_client *client)
+{
+	struct slg51000 *chip = i2c_get_clientdata(client);
+	struct gpio_desc *desc;
+	int ret = 0;
+
+	if (chip->chip_cs_pin > 0) {
+		desc = gpio_to_desc(chip->chip_cs_pin);
+		ret = gpiod_direction_output_raw(desc, GPIOF_INIT_LOW);
 	}
 
 	return ret;
@@ -513,6 +563,7 @@ static struct i2c_driver slg51000_regulator_driver = {
 		.name = "slg51000-regulator",
 	},
 	.probe = slg51000_i2c_probe,
+	.remove = slg51000_i2c_remove,
 	.id_table = slg51000_i2c_id,
 };
 

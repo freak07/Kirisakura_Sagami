@@ -33,6 +33,7 @@ camera-y := \
 	cam_core/cam_subdev.o \
 	cam_smmu/cam_smmu_api.o \
 	cam_sync/cam_sync.o \
+	cam_sync/camera_sync.o \
 	cam_sync/cam_sync_util.o \
 	cam_cpas/cpas_top/cam_cpastop_hw.o \
 	cam_cpas/camss_top/cam_camsstop_hw.o \
@@ -165,6 +166,7 @@ camera-$(CONFIG_SPECTRA_SENSOR) += \
 	cam_sensor_module/cam_sensor/cam_sensor_dev.o \
 	cam_sensor_module/cam_sensor/cam_sensor_core.o \
 	cam_sensor_module/cam_sensor/cam_sensor_soc.o \
+	cam_sensor_module/cam_sensor/sony_camera.o \
 	cam_sensor_module/cam_sensor_io/cam_sensor_io.o \
 	cam_sensor_module/cam_sensor_io/cam_sensor_cci_i2c.o \
 	cam_sensor_module/cam_sensor_io/cam_sensor_qup_i2c.o \
@@ -218,7 +220,6 @@ camera-$(CONFIG_SPECTRA_TFE) += \
 	cam_isp/isp_hw_mgr/isp_hw/tfe_csid_hw/cam_tfe_csid_core.o \
 	cam_isp/isp_hw_mgr/isp_hw/tfe_csid_hw/cam_tfe_csid530.o \
 	cam_isp/isp_hw_mgr/cam_tfe_hw_mgr.o
-
 
 camera-y += camera_main.o
 
