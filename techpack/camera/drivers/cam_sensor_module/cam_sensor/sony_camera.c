@@ -2782,7 +2782,7 @@ static int sony_camera_set_power(struct sony_camera_data *data,
 	return rc;
 }
 
-module_init(sony_camera_init_module);
+late_initcall(sony_camera_init_module);
 module_exit(sony_camera_exit_module);
 
 MODULE_DESCRIPTION("SONY camera sensor driver");
