@@ -6722,4 +6722,3 @@ CONFIG_CORESIGHT_TGU=y
 CONFIG_CORESIGHT_OST=y
 # CONFIG_CORESIGHT_FUSE is not set
 # end of Kernel hacking
-XQ-BC52:/ #                                                                                                                                                                                                                                                                       
