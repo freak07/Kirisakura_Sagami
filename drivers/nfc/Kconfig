@@ -87,3 +87,6 @@ config NFC_QTI_I3C
 	  This enables the NFC driver for SNxxx based devices.
 	  This is for I3C connected version. NCI protocol logic
 	  resides in the usermode and it has no other NFC dependencies.
+
+source "drivers/nfc/sn1x0_i2c/Kconfig"
+source "drivers/nfc/sn1x0_spi/Kconfig"
