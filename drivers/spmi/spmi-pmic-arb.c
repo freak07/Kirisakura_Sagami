@@ -480,9 +480,16 @@ static void qpnpint_spmi_write(struct irq_data *d, u8 reg, void *buf,
 	u8 per = hwirq_to_per(d->hwirq);
 
 	if (pmic_arb_write_cmd(pmic_arb->spmic, SPMI_CMD_EXT_WRITEL, sid,
-			       (per << 8) + reg, buf, len))
+			       (per << 8) + reg, buf, len)) {
 		dev_err_ratelimited(&pmic_arb->spmic->dev, "failed irqchip transaction on %x\n",
 				    d->irq);
+
+		if ((sid == 0x0) && (per == 0x13) && (reg == 0x14) && (len == 0x1) && (((u8*)buf)[0] == 0x80)) {
+			dev_err_ratelimited(&pmic_arb->spmic->dev, "WA applied\n");
+			if (pmic_arb_write_cmd(pmic_arb->spmic, SPMI_CMD_EXT_WRITEL, sid, (per << 8) + reg, buf, len))
+				dev_err_ratelimited(&pmic_arb->spmic->dev, "failed again, irqchip transaction on %x\n", d->irq);
+		}
+	}
 }
 
 static void qpnpint_spmi_read(struct irq_data *d, u8 reg, void *buf, size_t len)
