@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2010-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2021, The Linux Foundation. All rights reserved.
  */
 #ifndef __KGSL_PWRCTRL_H
 #define __KGSL_PWRCTRL_H
@@ -89,7 +89,9 @@ struct kgsl_pwrlevel {
  * @nb - Notifier block to receive GPU OPP change event
  * @active_pwrlevel - The currently active power level
  * @previous_pwrlevel - The power level before transition
- * @thermal_pwrlevel - maximum powerlevel constraint from thermal
+ * @thermal_pwrlevel - consolidated maximum thermal powerlevel constraint
+ * @sysfs_thermal_pwrlevel - maximum powerlevel constraint from sysfs
+ * @cooling_thermal_pwrlevel - maximum pwrlevel constraint from devfreq cooling fw
  * @thermal_pwrlevel_floor - minimum powerlevel constraint from thermal
  * @default_pwrlevel - device wake up power level
  * @max_pwrlevel - maximum allowable powerlevel per the user
@@ -133,6 +135,8 @@ struct kgsl_pwrctrl {
 	unsigned int active_pwrlevel;
 	unsigned int previous_pwrlevel;
 	unsigned int thermal_pwrlevel;
+	unsigned int sysfs_thermal_pwrlevel;
+	unsigned int cooling_thermal_pwrlevel;
 	unsigned int thermal_pwrlevel_floor;
 	unsigned int default_pwrlevel;
 	unsigned int wakeup_maxpwrlevel;
@@ -171,6 +175,10 @@ struct kgsl_pwrctrl {
 	u32 minbw_timeout;
 	/** @ddr_qos_devfreq: Devfreq device for setting DDR qos policy */
 	struct devfreq *ddr_qos_devfreq;
+	/** @time_in_pwrlevel: Each pwrlevel active duration in usec */
+	u64 time_in_pwrlevel[KGSL_MAX_PWRLEVELS];
+	/** @last_stat_updated: The last time stats were updated */
+	ktime_t last_stat_updated;
 };
 
 int kgsl_pwrctrl_init(struct kgsl_device *device);

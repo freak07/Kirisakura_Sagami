@@ -122,6 +122,19 @@ struct ipa_core_data {
 	int (*ipa_disconnect_wdi_pipe)(u32 clnt_hdl);
 	int (*ipa_uc_reg_rdyCB)(struct ipa_wdi_uc_ready_params *param);
 	int (*ipa_uc_dereg_rdyCB)(void);
+
+	int (*ipa_rmnet_ll_xmit)(struct sk_buff *skb);
+
+	int (*ipa_register_rmnet_ll_cb)(
+		void (*ipa_rmnet_ll_ready_cb)(void *user_data1),
+		void *user_data1,
+		void (*ipa_rmnet_ll_stop_cb)(void *user_data2),
+		void *user_data2,
+		void (*ipa_rmnet_ll_rx_notify_cb)(
+			void *user_data3, void *rx_data),
+		void *user_data3);
+
+	int (*ipa_unregister_rmnet_ll_cb)(void);
 };
 
 struct ipa_usb_data {
@@ -149,6 +162,8 @@ struct ipa_usb_data {
 
 	int (*ipa_usb_xdci_resume)(u32 ul_clnt_hdl, u32 dl_clnt_hdl,
 		enum ipa_usb_teth_prot teth_prot);
+
+	bool (*ipa_usb_is_teth_prot_connected)(enum ipa_usb_teth_prot usb_teth_prot);
 };
 
 struct ipa_wdi3_data {
@@ -186,6 +201,8 @@ struct ipa_wdi3_data {
 	int (*ipa_wdi_sw_stats)(struct ipa_wdi_tx_info *info);
 
 	int (*ipa_get_wdi_version)(void);
+
+	bool (*ipa_wdi_is_tx1_used)(void);
 };
 
 struct ipa_qdss_data {
@@ -314,6 +331,13 @@ struct ipa_eth_data {
 	int (*ipa_eth_client_conn_evt)(struct ipa_ecm_msg *msg);
 
 	int (*ipa_eth_client_disconn_evt)(struct ipa_ecm_msg *msg);
+
+	enum ipa_client_type (*ipa_eth_get_ipa_client_type_from_eth_type)(
+		enum ipa_eth_client_type eth_client_type,
+		enum ipa_eth_pipe_direction dir);
+
+	bool (*ipa_eth_client_exist)(
+		enum ipa_eth_client_type eth_client_type, int inst_id);
 };
 
 #if IS_ENABLED(CONFIG_IPA3)
