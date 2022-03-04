@@ -26,6 +26,10 @@
 #include "wcd-mbhc-legacy.h"
 #include "wcd-mbhc-adc.h"
 #include <asoc/wcd-mbhc-v2-api.h>
+#include <linux/sysfs.h>
+#include <linux/kobject.h>
+
+struct wcd_mbhc *mbhc_local;
 
 void wcd_mbhc_jack_report(struct wcd_mbhc *mbhc,
 			  struct snd_soc_jack *jack, int status, int mask)
@@ -560,6 +564,7 @@ void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 	struct snd_soc_component *component = mbhc->component;
 	bool is_pa_on = false;
 	u8 fsm_en = 0;
+	bool skip_report = false;
 
 	WCD_MBHC_RSC_ASSERT_LOCKED(mbhc);
 
@@ -685,9 +690,11 @@ void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 		else if (jack_type == SND_JACK_HEADSET) {
 			mbhc->current_plug = MBHC_PLUG_TYPE_HEADSET;
 			mbhc->jiffies_atreport = jiffies;
-		} else if (jack_type == SND_JACK_LINEOUT)
+		} else if (jack_type == SND_JACK_LINEOUT) {
 			mbhc->current_plug = MBHC_PLUG_TYPE_HIGH_HPH;
-		else {
+			skip_report = true;
+			pr_debug("%s: extension cable detected\n", __func__);
+		} else {
 			pr_debug("%s: invalid Jack type %d\n",__func__, jack_type);
 		}
 
@@ -763,11 +770,16 @@ void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 		    mbhc->mbhc_cb->mbhc_micb_ramp_control)
 			mbhc->mbhc_cb->mbhc_micb_ramp_control(component, false);
 
-		pr_debug("%s: Reporting insertion %d(%x)\n", __func__,
-			 jack_type, mbhc->hph_status);
-		wcd_mbhc_jack_report(mbhc, &mbhc->headset_jack,
-				    (mbhc->hph_status | SND_JACK_MECHANICAL),
-				    WCD_MBHC_JACK_MASK);
+		if (!skip_report) {
+			pr_debug("%s: Reporting insertion %d(%x)\n", __func__,
+				 jack_type, mbhc->hph_status);
+			wcd_mbhc_jack_report(mbhc, &mbhc->headset_jack,
+					    (mbhc->hph_status |
+						SND_JACK_MECHANICAL),
+					    WCD_MBHC_JACK_MASK);
+		} else {
+			pr_debug("%s: Skip reporting insertion\n", __func__);
+		}
 		wcd_mbhc_clr_and_turnon_hph_padac(mbhc);
 	}
 	pr_debug("%s: leave hph_status %x\n", __func__, mbhc->hph_status);
@@ -1644,6 +1656,19 @@ static int wcd_mbhc_usbc_ana_event_handler(struct notifier_block *nb,
 }
 #endif
 
+static ssize_t codec_plug_debug_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct wcd_mbhc *mbhc = mbhc_local;
+	u32 val = mbhc->hph_status;
+
+	return sprintf(buf, "%d\n", val);
+}
+
+static struct device_attribute plug_debug_attribute =
+	__ATTR(audio_jack_status, S_IRUGO | S_IWUSR | S_IWGRP,
+		codec_plug_debug_show,
+		NULL);
+
 int wcd_mbhc_start(struct wcd_mbhc *mbhc, struct wcd_mbhc_config *mbhc_cfg)
 {
 	int rc = 0;
@@ -2011,6 +2036,13 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_component *component,
 		goto err_hphr_ocp_irq;
 	}
 
+	if (sysfs_create_file(&mbhc->component->dev->kobj, &plug_debug_attribute.attr) < 0) {
+		pr_err("%s: sysfs audio_jack_status create error\n", __func__);
+	} else {
+		mbhc_local = mbhc;
+		pr_info("%s: sysfs audio_jack_status created\n", __func__);
+	}
+
 	mbhc->deinit_in_progress = false;
 	pr_debug("%s: leave ret %d\n", __func__, ret);
 	return ret;
@@ -2069,6 +2101,7 @@ void wcd_mbhc_deinit(struct wcd_mbhc *mbhc)
 	mutex_destroy(&mbhc->codec_resource_lock);
 	mutex_destroy(&mbhc->hphl_pa_lock);
 	mutex_destroy(&mbhc->hphr_pa_lock);
+	sysfs_remove_file(&mbhc->component->dev->kobj, &plug_debug_attribute.attr);
 }
 EXPORT_SYMBOL(wcd_mbhc_deinit);
 

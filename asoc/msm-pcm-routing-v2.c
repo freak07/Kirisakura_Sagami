@@ -91,6 +91,7 @@ static int num_app_cfg_types;
 static int msm_ec_ref_port_id;
 static int afe_loopback_tx_port_index;
 static int afe_loopback_tx_port_id = -1;
+static uint32_t clipper_1_enable = 0;
 
 #define WEIGHT_0_DB 0x4000
 /* all the FEs which can support channel mixer */
@@ -474,7 +475,7 @@ static void msm_pcm_routng_cfg_matrix_map_pp(struct route_payload payload,
 	int itr = 0, rc = 0;
 
 	if ((path_type == ADM_PATH_PLAYBACK) &&
-	    (perf_mode == LEGACY_PCM_MODE) &&
+	    ((perf_mode == LEGACY_PCM_MODE) || (perf_mode == LOW_LATENCY_PCM_MODE)) &&
 	    is_custom_stereo_on) {
 		for (itr = 0; itr < payload.num_copps; itr++) {
 			if ((payload.port_id[itr] != SLIMBUS_0_RX) &&
@@ -2035,6 +2036,7 @@ int msm_pcm_routing_reg_phy_stream(int fedai_id, int perf_mode,
 	uint32_t passthr_mode = LEGACY_PCM;
 	int ret = 0;
 	uint32_t copp_token = 0;
+	bool is_copp_24bit = false;
 
 	if (fedai_id >= MSM_FRONTEND_DAI_MM_MAX_ID) {
 		/* bad ID assigned in machine driver */
@@ -2080,6 +2082,8 @@ int msm_pcm_routing_reg_phy_stream(int fedai_id, int perf_mode,
 
 			bits_per_sample = msm_routing_get_bit_width(
 						msm_bedais[i].format);
+			if (bits_per_sample == 24)
+				is_copp_24bit = true;
 
 			app_type =
 			fe_dai_app_type_cfg[fedai_id][session_type][i].app_type;
@@ -2096,6 +2100,11 @@ int msm_pcm_routing_reg_phy_stream(int fedai_id, int perf_mode,
 					.copp_token;
 			} else
 				sample_rate = msm_bedais[i].sample_rate;
+
+			if (path_type == 2) {
+				if (is_copp_24bit == true)
+					bits_per_sample = 24;
+			}
 
 			acdb_dev_id =
 			fe_dai_app_type_cfg[fedai_id][session_type][i]
@@ -2279,6 +2288,7 @@ static void msm_pcm_routing_process_audio(u16 reg, u16 val, int set)
 	uint32_t passthr_mode;
 	bool is_lsm;
 	uint32_t copp_token = 0;
+	bool is_copp_24bit = false;
 
 	pr_debug("%s: reg %x val %x set %x\n", __func__, reg, val, set);
 
@@ -2358,6 +2368,8 @@ static void msm_pcm_routing_process_audio(u16 reg, u16 val, int set)
 
 			bits_per_sample = msm_routing_get_bit_width(
 						msm_bedais[reg].format);
+			if (bits_per_sample == 24)
+				is_copp_24bit = true;
 
 			app_type =
 			fe_dai_app_type_cfg[val][session_type][reg].app_type;
@@ -2382,6 +2394,10 @@ static void msm_pcm_routing_process_audio(u16 reg, u16 val, int set)
 					.copp_token;
 			} else
 				sample_rate = msm_bedais[reg].sample_rate;
+			if (path_type == 2) {
+				if (is_copp_24bit == true)
+					bits_per_sample = 24;
+			}
 
 			topology = msm_routing_get_adm_topology(val,
 								session_type,
@@ -24440,6 +24456,78 @@ static const struct snd_kcontrol_new int4_mi2s_rx_vi_fb_stereo_ch_mux =
 	int4_mi2s_rx_vi_fb_stereo_ch_mux_enum, spkr_prot_get_vi_rch_port,
 	spkr_prot_put_vi_rch_port);
 
+static int msm_adm_clipper_1_get(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = clipper_1_enable;
+	pr_debug("%s: state of clipper 1: %ld\n" , __func__,
+				ucontrol->value.integer.value[0]);
+	return 0;
+}
+
+static int msm_adm_clipper_1_put(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	int i, app_type, be_id, fe_id;
+	unsigned long copp;
+	int ret = 0;
+	int ret2 = 0;
+	int port_id = 0;
+	struct msm_pcm_routing_bdai_data *bedai;
+
+	clipper_1_enable = (uint32_t)ucontrol->value.integer.value[0];
+	app_type = ucontrol->value.integer.value[1];
+
+	if ((clipper_1_enable < 0) || (clipper_1_enable > 1)) {
+		pr_err("%s: Invalid values. clipper module status:%d", __func__,
+			clipper_1_enable);
+		return -EINVAL;
+	}
+
+	mutex_lock(&routing_lock);
+	for (be_id = 0; be_id < MSM_BACKEND_DAI_MAX; be_id++) {
+		if (!msm_bedais[be_id].active)
+			continue;
+
+		bedai = &msm_bedais[be_id];
+		pr_debug("%s: be_id=%d, bedai->fe_sessions=%#x\n", __func__,
+			be_id, (int)bedai->fe_sessions[0]);
+
+		port_id = msm_bedais[be_id].port_id;
+
+		for (fe_id = 0; fe_id < MSM_FRONTEND_DAI_MAX; fe_id++) {
+			if (!test_bit(fe_id, &bedai->fe_sessions[0]))
+				continue;
+
+			if (app_type != fe_dai_app_type_cfg[fe_id][SESSION_TYPE_RX][be_id].app_type)
+				continue;
+
+			copp = session_copp_map[fe_id][SESSION_TYPE_RX][be_id];
+			for (i = 0; i < MAX_COPPS_PER_PORT; i++) {
+				if (!test_bit(i, &copp))
+					continue;
+
+				ret2 = adm_set_rampup_clipper(port_id, i,
+						clipper_1_enable, AUDPROC_MODULE_ID_RAMP_UP_CLIPPER_1);
+				if (ret2 < 0) {
+					pr_err("%s Failed to change state of clipper module %d\n",
+						__func__, ret2);
+				}
+
+				ret |= ret2;
+			}
+		}
+	}
+	mutex_unlock(&routing_lock);
+	return ret ? -EINVAL : 0;
+}
+
+static struct snd_kcontrol_new msm_adm_clipper_control_1[] = {
+	SOC_SINGLE_MULTI_EXT("Fade In", SND_SOC_NOPM, 0,
+	1, 0, 2, msm_adm_clipper_1_get,
+	msm_adm_clipper_1_put),
+};
+
 static const struct snd_soc_dapm_widget msm_qdsp6_widgets[] = {
 	/* Frontend AIF */
 	/* Widget name equals to Front-End DAI name<Need confirmation>,
@@ -30487,7 +30575,7 @@ static const struct snd_soc_dapm_route intercon_mi2s[] = {
 	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_RX_DL_HL"},
 	{"QUIN_MI2S_RX_DL_HL", "Switch", "QUIN_MI2S_DL_HL"},
 	{"QUIN_MI2S_RX", NULL, "QUIN_MI2S_RX_DL_HL"},
-	{"SEN_MI2S_RX_DL_HL", "Switch", "SEN_MI2S_DL_HL"},
+	{"SEN_MI2S_RX_DL_HL", "Switch", "CDC_DMA_DL_HL"}, // should use CDC_DMA_DL_HL replace SEN_MI2S_DL_HL
 	{"SEN_MI2S_RX", NULL, "SEN_MI2S_RX_DL_HL"},
 	{"MI2S_UL_HL", NULL, "TERT_MI2S_TX"},
 	{"INT3_MI2S_UL_HL", NULL, "INT3_MI2S_TX"},
@@ -32350,6 +32438,9 @@ static int msm_routing_probe(struct snd_soc_component *component)
 				      ARRAY_SIZE(mclk_src_controls));
 	snd_soc_add_component_controls(component, asrc_config_controls,
 				      ARRAY_SIZE(asrc_config_controls));
+
+	snd_soc_add_component_controls(component, msm_adm_clipper_control_1,
+				ARRAY_SIZE(msm_adm_clipper_control_1));
 	return 0;
 }
 
