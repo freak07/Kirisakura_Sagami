@@ -1767,7 +1767,7 @@ static int wma_unified_link_peer_stats_event_handler(void *handle,
 		for (count = 0; count < peer_stats->num_rates; count++) {
 			mcs_index = RATE_STAT_GET_MCS_INDEX(rate_stats->rate);
 			if (QDF_IS_STATUS_SUCCESS(status)) {
-				if (rate_stats->rate && mcs_index < MAX_MCS)
+				if (mcs_index < MAX_MCS)
 					rate_stats->rx_mpdu =
 					    dp_stats->rx.rx_mpdu_cnt[mcs_index];
 				else
@@ -1961,18 +1961,23 @@ static int wma_unified_radio_tx_power_level_stats_event_handler(void *handle,
 		return -EINVAL;
 	}
 
-	if (!rs_results->tx_time_per_power_level) {
-		rs_results->tx_time_per_power_level = qdf_mem_malloc(
-				sizeof(uint32_t) *
-				rs_results->total_num_tx_power_levels);
-		if (!rs_results->tx_time_per_power_level) {
-			/* In error case, atleast send the radio stats without
-			 * tx_power_level stats */
-			rs_results->total_num_tx_power_levels = 0;
-			link_stats_results->nr_received++;
-			goto post_stats;
-		}
+	if (rs_results->tx_time_per_power_level) {
+		qdf_mem_free(rs_results->tx_time_per_power_level);
+		rs_results->tx_time_per_power_level = NULL;
 	}
+
+	rs_results->tx_time_per_power_level =
+		qdf_mem_malloc(sizeof(uint32_t) *
+			       rs_results->total_num_tx_power_levels);
+	if (!rs_results->tx_time_per_power_level) {
+		/* In error case, atleast send the radio stats without
+		 * tx_power_level stats
+		 */
+		rs_results->total_num_tx_power_levels = 0;
+		link_stats_results->nr_received++;
+		goto post_stats;
+	}
+
 	qdf_mem_copy(&rs_results->tx_time_per_power_level[
 					fixed_param->power_level_offset],
 		tx_power_level_values,
@@ -2024,6 +2029,13 @@ static int wma_copy_chan_stats(uint32_t num_chan,
 		/* It means this is the first event for this radio */
 		rs_results->num_channels = num_chan;
 		rs_results->channels = channels;
+		return 0;
+	}
+	if (rs_results->num_channels + num_chan > NUM_CHANNELS) {
+		wma_err("total chan stats num unexpected %d new %d",
+			rs_results->num_channels, num_chan);
+		/* do not add more */
+		qdf_mem_free(channels);
 		return 0;
 	}
 
@@ -2231,7 +2243,8 @@ static int wma_unified_link_radio_stats_event_handler(void *handle,
 		chn_results =
 			(struct wifi_channel_stats *)&channels_in_this_event[0];
 		next_chan_offset = WMI_TLV_HDR_SIZE;
-		wma_debug("Channel Stats Info");
+		wma_debug("Channel Stats Info, radio id %d",
+			  radio_stats->radio_id);
 		for (count = 0; count < radio_stats->num_channels; count++) {
 			wma_nofl_debug("freq %u width %u freq0 %u freq1 %u awake time %u cca busy time %u",
 				       channel_stats->center_freq,
@@ -2536,7 +2549,8 @@ wma_send_ll_stats_get_cmd(tp_wma_handle wma_handle,
 {
 	if (!(cfg_get(wma_handle->psoc, CFG_CLUB_LL_STA_AND_GET_STATION) &&
 	      wmi_service_enabled(wma_handle->wmi_handle,
-				  wmi_service_get_station_in_ll_stats_req)))
+				  wmi_service_get_station_in_ll_stats_req) &&
+	      wma_handle->interfaces[cmd->vdev_id].type == WMI_VDEV_TYPE_STA))
 		return wmi_unified_process_ll_stats_get_cmd(
 						wma_handle->wmi_handle, cmd);
 

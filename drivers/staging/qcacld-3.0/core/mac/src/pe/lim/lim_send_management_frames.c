@@ -268,7 +268,8 @@ lim_send_probe_req_mgmt_frame(struct mac_context *mac_ctx,
 	 * RRM is enabled. It should be ok even if we add it into probe req when
 	 * RRM is not enabled.
 	 */
-	populate_dot11f_ds_params(mac_ctx, &pr->DSParams, channel);
+	populate_dot11f_ds_params(mac_ctx, &pr->DSParams,
+				  chan_freq);
 	/* Call RRM module to get the tx power for management used. */
 	txPower = (uint8_t) rrm_get_mgmt_tx_power(mac_ctx, pesession);
 	populate_dot11f_wfatpc(mac_ctx, &pr->WFATPC, txPower, 0);
@@ -652,8 +653,7 @@ lim_send_probe_rsp_mgmt_frame(struct mac_context *mac_ctx,
 
 	populate_dot11f_ds_params(
 		mac_ctx, &frm->DSParams,
-		wlan_reg_freq_to_chan(mac_ctx->pdev,
-				      pe_session->curr_op_freq));
+		pe_session->curr_op_freq);
 
 	if (LIM_IS_AP_ROLE(pe_session)) {
 		if (pe_session->wps_state != SAP_WPS_DISABLED)
@@ -4989,6 +4989,59 @@ returnAfterError:
 	return status_code;
 }
 
+static bool
+lim_is_self_and_peer_ocv_capable(struct mac_context *mac,
+				 uint8_t *peer,
+				 struct pe_session *pe_session)
+{
+	uint16_t self_rsn_cap, aid;
+	tpDphHashNode sta_ds;
+
+	self_rsn_cap = wlan_crypto_get_param(pe_session->vdev,
+					     WLAN_CRYPTO_PARAM_RSN_CAP);
+	if (!(self_rsn_cap & WLAN_CRYPTO_RSN_CAP_OCV_SUPPORTED))
+		return false;
+
+	sta_ds = dph_lookup_hash_entry(mac, peer, &aid,
+				       &pe_session->dph.dphHashTable);
+
+	if (sta_ds && sta_ds->ocv_enabled)
+		return true;
+
+	return false;
+}
+
+static void
+lim_fill_oci_params(struct mac_context *mac, struct pe_session *session,
+		    tDot11fIEoci *oci)
+{
+	uint8_t ch_offset;
+	uint8_t prim_ch_num = wlan_reg_freq_to_chan(mac->pdev,
+						    session->curr_op_freq);
+	if (session->ch_width == CH_WIDTH_80MHZ) {
+		ch_offset = BW80;
+	} else {
+		switch (session->htSecondaryChannelOffset) {
+		case PHY_DOUBLE_CHANNEL_HIGH_PRIMARY:
+			ch_offset = BW40_HIGH_PRIMARY;
+			break;
+		case PHY_DOUBLE_CHANNEL_LOW_PRIMARY:
+			ch_offset = BW40_LOW_PRIMARY;
+			break;
+		default:
+			ch_offset = BW20;
+			break;
+		}
+	}
+	oci->op_class = lim_op_class_from_bandwidth(mac,
+						    session->curr_op_freq,
+						    session->ch_width,
+						    ch_offset);
+	oci->prim_ch_num = prim_ch_num;
+	oci->freq_seg_1_ch_num = session->ch_center_freq_seg1;
+	oci->present = 1;
+}
+
 #ifdef WLAN_FEATURE_11W
 /**
  * \brief Send SA query request action frame to peer
@@ -5031,6 +5084,9 @@ QDF_STATUS lim_send_sa_query_request_frame(struct mac_context *mac, uint8_t *tra
 	frm.Action.action = SA_QUERY_REQUEST;
 	/* 11w SA Query Request transId */
 	qdf_mem_copy(&frm.TransactionId.transId[0], &transId[0], 2);
+
+	if (lim_is_self_and_peer_ocv_capable(mac, peer, pe_session))
+		lim_fill_oci_params(mac, pe_session, &frm.oci);
 
 	nStatus = dot11f_get_packed_sa_query_req_size(mac, &frm, &nPayload);
 	if (DOT11F_FAILED(nStatus)) {
@@ -5116,59 +5172,6 @@ returnAfterError:
 	cds_packet_free((void *)pPacket);
 	return nSirStatus;
 } /* End lim_send_sa_query_request_frame */
-
-static bool
-lim_is_self_and_peer_ocv_capable(struct mac_context *mac,
-				 uint8_t *peer,
-				 struct pe_session *pe_session)
-{
-	uint16_t self_rsn_cap, aid;
-	tpDphHashNode sta_ds;
-
-	self_rsn_cap = wlan_crypto_get_param(pe_session->vdev,
-					     WLAN_CRYPTO_PARAM_RSN_CAP);
-	if (!(self_rsn_cap & WLAN_CRYPTO_RSN_CAP_OCV_SUPPORTED))
-		return false;
-
-	sta_ds = dph_lookup_hash_entry(mac, peer, &aid,
-				       &pe_session->dph.dphHashTable);
-
-	if (sta_ds && sta_ds->ocv_enabled)
-		return true;
-
-	return false;
-}
-
-static void
-lim_fill_oci_params(struct mac_context *mac, struct pe_session *session,
-		    tDot11fIEoci *oci)
-{
-	uint8_t ch_offset;
-	uint8_t prim_ch_num = wlan_reg_freq_to_chan(mac->pdev,
-						    session->curr_op_freq);
-	if (session->ch_width == CH_WIDTH_80MHZ) {
-		ch_offset = BW80;
-	} else {
-		switch (session->htSecondaryChannelOffset) {
-		case PHY_DOUBLE_CHANNEL_HIGH_PRIMARY:
-			ch_offset = BW40_HIGH_PRIMARY;
-			break;
-		case PHY_DOUBLE_CHANNEL_LOW_PRIMARY:
-			ch_offset = BW40_LOW_PRIMARY;
-			break;
-		default:
-			ch_offset = BW20;
-			break;
-		}
-	}
-	oci->op_class = lim_op_class_from_bandwidth(mac,
-						    session->curr_op_freq,
-						    session->ch_width,
-						    ch_offset);
-	oci->prim_ch_num = prim_ch_num;
-	oci->freq_seg_1_ch_num = session->ch_center_freq_seg1;
-	oci->present = 1;
-}
 
 /**
  * \brief Send SA query response action frame to peer
@@ -5268,8 +5271,10 @@ QDF_STATUS lim_send_sa_query_response_frame(struct mac_context *mac,
 			nStatus);
 	}
 
-	pe_debug("Sending a SA Query Response to");
-	lim_print_mac_addr(mac, peer, LOGD);
+	pe_debug("Sending SA Query Response to "QDF_MAC_ADDR_FMT" op_class %d prim_ch_num %d freq_seg_1_ch_num %d oci_present %d",
+		 QDF_MAC_ADDR_REF(peer), frm.oci.op_class,
+		 frm.oci.prim_ch_num, frm.oci.freq_seg_1_ch_num,
+		 frm.oci.present);
 
 	if (!wlan_reg_is_24ghz_ch_freq(pe_session->curr_op_freq) ||
 	    pe_session->opmode == QDF_P2P_CLIENT_MODE ||
@@ -5316,7 +5321,7 @@ returnAfterError:
 QDF_STATUS lim_send_addba_response_frame(struct mac_context *mac_ctx,
 		tSirMacAddr peer_mac, uint16_t tid,
 		struct pe_session *session, uint8_t addba_extn_present,
-		uint8_t amsdu_support, uint8_t is_wep)
+		uint8_t amsdu_support, uint8_t is_wep, uint16_t calc_buff_size)
 {
 
 	tDot11faddba_rsp frm;
@@ -5331,7 +5336,7 @@ QDF_STATUS lim_send_addba_response_frame(struct mac_context *mac_ctx,
 	uint8_t dialog_token;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 	uint8_t he_frag = 0;
-	tpDphHashNode sta_ds;
+	tpDphHashNode sta_ds = NULL;
 	uint16_t aid;
 	bool he_cap = false;
 	struct wlan_mlme_qos *qos_aggr;
@@ -5341,6 +5346,7 @@ QDF_STATUS lim_send_addba_response_frame(struct mac_context *mac_ctx,
 	cdp_addba_responsesetup(soc, peer_mac, vdev_id, tid,
 				&dialog_token, &status_code, &buff_size,
 				&batimeout);
+
 	qos_aggr = &mac_ctx->mlme_cfg->qos_mlme_params;
 	qdf_mem_zero((uint8_t *) &frm, sizeof(frm));
 	frm.Category.category = ACTION_CATEGORY_BACK;
@@ -5349,42 +5355,51 @@ QDF_STATUS lim_send_addba_response_frame(struct mac_context *mac_ctx,
 	frm.DialogToken.token = dialog_token;
 	frm.Status.status = status_code;
 
-	if (qos_aggr->reject_addba_req) {
+	if ((LIM_IS_STA_ROLE(session) && qos_aggr->rx_aggregation_size == 1 &&
+	    !mac_ctx->usr_cfg_ba_buff_size) || mac_ctx->reject_addba_req) {
 		frm.Status.status = STATUS_REQUEST_DECLINED;
-		pe_err("refused addba req");
-	}
-	frm.addba_param_set.tid = tid;
+		pe_err("refused addba req for rx_aggregation_size: %d mac_ctx->reject_addba_req: %d",
+		       qos_aggr->rx_aggregation_size, mac_ctx->reject_addba_req);
+	} else if (LIM_IS_STA_ROLE(session) && !mac_ctx->usr_cfg_ba_buff_size) {
+		frm.addba_param_set.buff_size =
+			QDF_MIN(qos_aggr->rx_aggregation_size, calc_buff_size);
+	} else {
+		sta_ds = dph_lookup_hash_entry(mac_ctx, peer_mac, &aid,
+					       &session->dph.dphHashTable);
+		if (sta_ds && lim_is_session_he_capable(session))
+			he_cap = lim_is_sta_he_capable(sta_ds);
 
-	sta_ds = dph_lookup_hash_entry(mac_ctx, peer_mac, &aid,
-				       &session->dph.dphHashTable);
-	if (sta_ds && lim_is_session_he_capable(session))
-		he_cap = lim_is_sta_he_capable(sta_ds);
-
-	if (he_cap)
-		frm.addba_param_set.buff_size = MAX_BA_BUFF_SIZE;
-	else
-		frm.addba_param_set.buff_size = SIR_MAC_BA_DEFAULT_BUFF_SIZE;
-
-	if (mac_ctx->usr_cfg_ba_buff_size)
-		frm.addba_param_set.buff_size = mac_ctx->usr_cfg_ba_buff_size;
-
-	if (frm.addba_param_set.buff_size > MAX_BA_BUFF_SIZE)
-		frm.addba_param_set.buff_size = MAX_BA_BUFF_SIZE;
-
-	if (frm.addba_param_set.buff_size > SIR_MAC_BA_DEFAULT_BUFF_SIZE) {
-		if (session->active_ba_64_session) {
+		if (sta_ds && sta_ds->staType == STA_ENTRY_NDI_PEER)
+			frm.addba_param_set.buff_size = calc_buff_size;
+		else if (he_cap)
+			frm.addba_param_set.buff_size = MAX_BA_BUFF_SIZE;
+		else
 			frm.addba_param_set.buff_size =
-				SIR_MAC_BA_DEFAULT_BUFF_SIZE;
+					SIR_MAC_BA_DEFAULT_BUFF_SIZE;
+
+		if (mac_ctx->usr_cfg_ba_buff_size)
+			frm.addba_param_set.buff_size =
+					mac_ctx->usr_cfg_ba_buff_size;
+
+		if (frm.addba_param_set.buff_size > MAX_BA_BUFF_SIZE)
+			frm.addba_param_set.buff_size = MAX_BA_BUFF_SIZE;
+
+		if (frm.addba_param_set.buff_size > SIR_MAC_BA_DEFAULT_BUFF_SIZE) {
+			if (session->active_ba_64_session) {
+				frm.addba_param_set.buff_size =
+					SIR_MAC_BA_DEFAULT_BUFF_SIZE;
+			}
+		} else if (!session->active_ba_64_session) {
+			session->active_ba_64_session = true;
 		}
-	} else if (!session->active_ba_64_session) {
-		session->active_ba_64_session = true;
-	}
-	if (buff_size && (frm.addba_param_set.buff_size > buff_size)) {
-		pe_debug("buff size: %d larger than peer's capability: %d",
-			 frm.addba_param_set.buff_size, buff_size);
-		frm.addba_param_set.buff_size = buff_size;
+		if (buff_size && (frm.addba_param_set.buff_size > buff_size)) {
+			pe_debug("buff size: %d larger than peer's capability: %d",
+				 frm.addba_param_set.buff_size, buff_size);
+			frm.addba_param_set.buff_size = buff_size;
+		}
 	}
 
+	frm.addba_param_set.tid = tid;
 	/* Enable RX AMSDU only in HE mode if supported */
 	if (mac_ctx->is_usr_cfg_amsdu_enabled &&
 	    ((IS_PE_SESSION_HE_MODE(session) &&
@@ -5664,8 +5679,6 @@ error_delba:
 	return qdf_status;
 }
 
-#define WLAN_SAE_AUTH_TIMEOUT 1000
-
 /**
  * lim_tx_mgmt_frame() - Transmits Auth mgmt frame
  * @mac_ctx Pointer to Global MAC structure
@@ -5725,6 +5738,7 @@ lim_handle_sae_auth_retry(struct mac_context *mac_ctx, uint8_t vdev_id,
 	struct pe_session *session;
 	struct sae_auth_retry *sae_retry;
 	uint8_t retry_count = 0;
+	uint32_t val = 0;
 
 	session = pe_find_session_by_vdev_id(mac_ctx, vdev_id);
 	if (!session) {
@@ -5732,7 +5746,8 @@ lim_handle_sae_auth_retry(struct mac_context *mac_ctx, uint8_t vdev_id,
 		       vdev_id);
 		return;
 	}
-	if (session->opmode != QDF_STA_MODE)
+	if ((session->opmode != QDF_STA_MODE) &&
+	    (session->opmode != QDF_P2P_CLIENT_MODE))
 		return;
 
 	if (session->limMlmState == eLIM_MLM_WT_SAE_AUTH_STATE)
@@ -5760,16 +5775,18 @@ lim_handle_sae_auth_retry(struct mac_context *mac_ctx, uint8_t vdev_id,
 		return;
 
 	pe_debug("SAE auth frame queued vdev_id %d seq_num %d",
-		 vdev_id, mac_ctx->mgmtSeqNum);
+		 vdev_id, mac_ctx->mgmtSeqNum + 1);
 	qdf_mem_copy(sae_retry->sae_auth.data, frame, frame_len);
 	mac_ctx->lim.lim_timers.g_lim_periodic_auth_retry_timer.sessionId =
 					session->peSessionId;
 	sae_retry->sae_auth.len = frame_len;
 	sae_retry->sae_auth_max_retry = retry_count;
 
+	val = mac_ctx->mlme_cfg->timeouts.sae_auth_failure_timeout;
+
 	tx_timer_change(
 		&mac_ctx->lim.lim_timers.g_lim_periodic_auth_retry_timer,
-		SYS_MS_TO_TICKS(WLAN_SAE_AUTH_TIMEOUT), 0);
+		SYS_MS_TO_TICKS(val), 0);
 	/* Activate Auth Retry timer */
 	if (tx_timer_activate(
 	    &mac_ctx->lim.lim_timers.g_lim_periodic_auth_retry_timer) !=

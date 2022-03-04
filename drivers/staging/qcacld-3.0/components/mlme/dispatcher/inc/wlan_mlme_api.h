@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1966,6 +1967,17 @@ wlan_mlme_get_srd_master_mode_for_vdev(struct wlan_objmgr_psoc *psoc,
 				       bool *value);
 
 /**
+ * wlan_mlme_get_indoor_support_for_nan  - Get indoor channel support for NAN
+ * @psoc: pointer to psoc object
+ * @value: pointer to the value which will be filled for the caller
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS
+wlan_mlme_get_indoor_support_for_nan(struct wlan_objmgr_psoc *psoc,
+				     bool *value);
+
+/**
  * wlan_mlme_get_force_sap_enabled() - Get the value of force SAP enabled
  * @psoc: psoc context
  * @value: data to get
@@ -2341,7 +2353,7 @@ wlan_mlme_get_self_gen_frm_pwr(struct wlan_objmgr_psoc *psoc,
  * Return: QDF Status
  */
 QDF_STATUS
-wlan_mlme_get_4way_hs_offload(struct wlan_objmgr_psoc *psoc, bool *value);
+wlan_mlme_get_4way_hs_offload(struct wlan_objmgr_psoc *psoc, uint32_t *value);
 
 /**
  * wlan_mlme_get_bmiss_skip_full_scan_value() - To get value of
@@ -3096,5 +3108,117 @@ mlme_is_twt_enabled(struct wlan_objmgr_psoc *psoc)
  * preference
  */
 bool wlan_mlme_is_local_tpe_pref(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * wlan_mlme_skip_tpe() - Get preference to not consider TPE in 2G/5G case
+ *
+ * @psoc: pointer to psoc object
+ *
+ * Return: True if host should not consider TPE IE in TX power calculation when
+ * operating in 2G/5G bands, false if host should always consider TPE IE values
+ */
+bool wlan_mlme_skip_tpe(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * wlan_mlme_set_ba_2k_jump_iot_ap() - Set a flag if ba 2k jump IOT AP is found
+ * @vdev: vdev pointer
+ * @found: Carries the value true if ba 2k jump IOT AP is found
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS
+wlan_mlme_set_ba_2k_jump_iot_ap(struct wlan_objmgr_vdev *vdev, bool found);
+
+/**
+ * wlan_mlme_is_ba_2k_jump_iot_ap() - Check if ba 2k jump IOT AP is found
+ * @vdev: vdev pointer
+ *
+ * Return: true if ba 2k jump IOT AP is found
+ */
+bool
+wlan_mlme_is_ba_2k_jump_iot_ap(struct wlan_objmgr_vdev *vdev);
+
+/**
+ * wlan_mlme_set_bad_htc_he_iot_ap() - Set a flag if bad htc he IOT AP is found
+ * @vdev: vdev pointer
+ * @found: Carries the value true if bad htc he AP is found
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS
+wlan_mlme_set_bad_htc_he_iot_ap(struct wlan_objmgr_vdev *vdev, bool found);
+
+/**
+ * wlan_mlme_is_bad_htc_he_iot_ap() - Check if bad htc he IOT AP is found
+ * @vdev: vdev pointer
+ *
+ * Return: true if bad htc he IOT AP is found
+ */
+bool
+wlan_mlme_is_bad_htc_he_iot_ap(struct wlan_objmgr_vdev *vdev);
+
+/**
+ * wlan_mlme_set_last_delba_sent_time() - Cache the last delba sent ts
+ * @vdev: vdev pointer
+ * @delba_sent_time: Last delba sent timestamp
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS
+wlan_mlme_set_last_delba_sent_time(struct wlan_objmgr_vdev *vdev,
+				   qdf_time_t delba_sent_time);
+
+/**
+ * wlan_mlme_get_last_delba_sent_time() - Get the last delba sent ts
+ * @vdev: vdev pointer
+ *
+ * Return: Last delba timestamp if cached, 0 otherwise
+ */
+qdf_time_t
+wlan_mlme_get_last_delba_sent_time(struct wlan_objmgr_vdev *vdev);
+
+/**
+ * mlme_set_user_ps() - Set the PS user config
+ * @vdev: Vdev object pointer
+ * @ps_enable: User PS enable
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS mlme_set_user_ps(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
+			    bool ps_enable);
+
+/**
+ * mlme_get_user_ps() - Set the user ps flag
+ * @psoc: Pointer to psoc object
+ * @vdev_id: vdev id
+ *
+ * Return: True if user_ps flag is set
+ */
+bool mlme_get_user_ps(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id);
+
+/**
+ * wlan_mlme_get_mgmt_hw_tx_retry_count() - Get mgmt frame hw tx retry count
+ *
+ * @psoc: pointer to psoc object
+ * @frm_type: frame type of the query
+ *
+ * Return: hw tx retry count
+ */
+uint8_t
+wlan_mlme_get_mgmt_hw_tx_retry_count(struct wlan_objmgr_psoc *psoc,
+				     enum mlme_cfg_frame_type frm_type);
+
+/**
+ * wlan_mlme_get_tx_retry_multiplier() - Get the tx retry multiplier percentage
+ *
+ * @psoc: pointer to psoc object
+ * @tx_retry_multiplier: pointer to hold user config value of
+ * tx_retry_multiplier
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS
+wlan_mlme_get_tx_retry_multiplier(struct wlan_objmgr_psoc *psoc,
+				  uint32_t *tx_retry_multiplier);
 
 #endif /* _WLAN_MLME_API_H_ */

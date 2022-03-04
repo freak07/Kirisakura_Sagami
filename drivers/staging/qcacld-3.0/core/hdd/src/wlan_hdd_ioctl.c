@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -80,11 +81,20 @@
 #define WLAN_PRIV_DATA_MAX_LEN    8192
 
 /*
- * Driver miracast parameters 0-Disabled
+ * Driver miracast parameters:
+ * 0-Disabled
  * 1-Source, 2-Sink
+ * 128: miracast connecting time optimization enabled. At present host
+ * will disable imps to reduce connection time for p2p.
+ * 129: miracast connecting time optimization disabled
  */
-#define WLAN_HDD_DRIVER_MIRACAST_CFG_MIN_VAL 0
-#define WLAN_HDD_DRIVER_MIRACAST_CFG_MAX_VAL 2
+enum miracast_param {
+	MIRACAST_DISABLED,
+	MIRACAST_SOURCE,
+	MIRACAST_SINK,
+	MIRACAST_CONN_OPT_ENABLED = 128,
+	MIRACAST_CONN_OPT_DISABLED = 129,
+};
 
 /*
  * When ever we need to print IBSSPEERINFOALL for more than 16 STA
@@ -616,8 +626,7 @@ int hdd_reassoc(struct hdd_adapter *adapter, const uint8_t *bssid,
 		ch_freq = sta_ctx->conn_info.chan_freq;
 	}
 
-	if (QDF_STATUS_SUCCESS !=
-	    wlan_hdd_validate_operation_channel(adapter, ch_freq)) {
+	if (!sme_is_channel_valid(hdd_ctx->mac_handle, ch_freq)) {
 		hdd_err("Invalid Ch freq: %d", ch_freq);
 		ret = -EINVAL;
 		goto exit;
@@ -2337,7 +2346,7 @@ static int hdd_enable_unit_test_commands(struct hdd_adapter *adapter,
 		}
 
 		if (hdd_ctx->target_type == TARGET_TYPE_QCA6490) {
-			arg[0] = 39;
+			arg[0] = 44;
 			arg[1] = 3000;
 
 			status = sme_send_unit_test_cmd(adapter->vdev_id,
@@ -2400,7 +2409,7 @@ static int hdd_disable_unit_test_commands(struct hdd_adapter *adapter,
 		if (status != QDF_STATUS_SUCCESS)
 			return qdf_status_to_os_return(status);
 
-		arg[0] = 39;
+		arg[0] = 44;
 		arg[1] = 0;
 
 		status = sme_send_unit_test_cmd(adapter->vdev_id,
@@ -4595,8 +4604,7 @@ static int drv_cmd_fast_reassoc(struct hdd_adapter *adapter,
 	}
 
 	/* Check freq number is a valid freq number */
-	if (freq && QDF_STATUS_SUCCESS !=
-		wlan_hdd_validate_operation_channel(adapter, freq)) {
+	if (freq && !sme_is_channel_valid(mac_handle, freq)) {
 		hdd_err("Invalid freq [%d]", freq);
 		return -EINVAL;
 	}
@@ -4868,12 +4876,34 @@ static int drv_cmd_miracast(struct hdd_adapter *adapter,
 		ret = -EINVAL;
 		goto exit;
 	}
-	if ((filter_type < WLAN_HDD_DRIVER_MIRACAST_CFG_MIN_VAL) ||
-	    (filter_type > WLAN_HDD_DRIVER_MIRACAST_CFG_MAX_VAL)) {
-		hdd_err("Accepted Values are 0 to 2. 0-Disabled, 1-Source, 2-Sink");
+	hdd_debug("filter_type %d", filter_type);
+
+	switch (filter_type) {
+	case MIRACAST_DISABLED:
+	case MIRACAST_SOURCE:
+	case MIRACAST_SINK:
+		break;
+	case MIRACAST_CONN_OPT_ENABLED:
+	case MIRACAST_CONN_OPT_DISABLED:
+		{
+			bool is_imps_enabled = true;
+
+			ucfg_mlme_is_imps_enabled(hdd_ctx->psoc,
+						  &is_imps_enabled);
+			if (!is_imps_enabled)
+				return 0;
+			hdd_set_idle_ps_config(
+				hdd_ctx,
+				filter_type ==
+				MIRACAST_CONN_OPT_ENABLED ? false : true);
+			return 0;
+		}
+	default:
+		hdd_err("accepted Values: 0-Disabled, 1-Source, 2-Sink, 128,129");
 		ret = -EINVAL;
 		goto exit;
 	}
+
 	/* Filtertype value should be either 0-Disabled, 1-Source, 2-sink */
 	hdd_ctx->miracast_value = filter_type;
 
@@ -6493,9 +6523,12 @@ static int drv_cmd_set_channel_switch(struct hdd_adapter *adapter,
 
 	wlan_hdd_set_sap_csa_reason(hdd_ctx->psoc, adapter->vdev_id,
 				    CSA_REASON_USER_INITIATED);
-	status = hdd_softap_set_channel_change(dev,
-					       wlan_reg_legacy_chan_to_freq(hdd_ctx->pdev, chan_number),
-					       width, true);
+
+	if (chan_number <= wlan_reg_max_5ghz_ch_num())
+		chan_number = wlan_reg_legacy_chan_to_freq(hdd_ctx->pdev,
+							   chan_number);
+
+	status = hdd_softap_set_channel_change(dev, chan_number, width, true);
 	if (status) {
 		hdd_err("Set channel change fail");
 		return status;

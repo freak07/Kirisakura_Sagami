@@ -1983,15 +1983,15 @@ static void os_if_ndp_iface_create_rsp_handler(struct wlan_objmgr_psoc *psoc,
 	osif_debug("transaction id: %u status code: %u Reason: %u",
 		   create_transaction_id, create_status, create_reason);
 
-	cfg80211_vendor_event(vendor_event, GFP_KERNEL);
-
 	if (!create_fail) {
 		/* update txrx queues and register self sta */
 		cb_obj.drv_ndi_create_rsp_handler(wlan_vdev_get_id(vdev),
 						  ndi_rsp);
+		cfg80211_vendor_event(vendor_event, GFP_KERNEL);
 	} else {
 		osif_err("NDI interface creation failed with reason %d",
 			 create_reason);
+		cfg80211_vendor_event(vendor_event, GFP_KERNEL);
 		goto close_ndi;
 	}
 
@@ -2594,7 +2594,7 @@ static int os_if_process_nan_enable_req(struct wlan_objmgr_psoc *psoc,
 	return qdf_status_to_os_return(status);
 }
 
-int os_if_process_nan_req(struct wlan_objmgr_psoc *psoc,
+int os_if_process_nan_req(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 			  const void *data, int data_len)
 {
 	uint32_t nan_subcmd;
@@ -2617,8 +2617,10 @@ int os_if_process_nan_req(struct wlan_objmgr_psoc *psoc,
 	 * sure that HW mode is not set to DBS by NAN Enable request. NAN state
 	 * machine will remain unaffected in this case.
 	 */
-	if (!NAN_CONCURRENCY_SUPPORTED(psoc))
+	if (!NAN_CONCURRENCY_SUPPORTED(psoc)) {
+		policy_mgr_check_and_stop_opportunistic_timer(psoc, vdev_id);
 		return os_if_nan_generic_req(psoc, tb);
+	}
 
 	/*
 	 * Send all requests other than Enable/Disable as type GENERIC.

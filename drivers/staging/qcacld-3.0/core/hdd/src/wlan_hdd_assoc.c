@@ -78,12 +78,13 @@
 
 #include <ol_defines.h>
 #include "wlan_pkt_capture_ucfg_api.h"
-
-#ifdef WLAN_FEATURE_INTERFACE_MGR
 #include "wlan_if_mgr_ucfg_api.h"
 #include "wlan_if_mgr_public_struct.h"
-#endif
 #include "wlan_roam_debug.h"
+
+#include "wlan_hdd_twt.h"
+#include "wma_api.h"
+#include "wlan_hdd_cfr.h"
 
 /* These are needed to recognize WPA and RSN suite types */
 #define HDD_WPA_OUI_SIZE 4
@@ -468,6 +469,37 @@ void hdd_abort_ongoing_sta_connection(struct hdd_context *hdd_ctx)
 				status);
 		}
 	}
+}
+
+bool hdd_is_any_sta_connected(struct hdd_context *hdd_ctx)
+{
+	struct hdd_adapter *adapter = NULL, *next_adapter = NULL;
+	struct hdd_station_ctx *hdd_sta_ctx;
+	wlan_net_dev_ref_dbgid dbgid =
+				NET_DEV_HOLD_IS_ANY_STA_CONNECTED;
+
+	if (!hdd_ctx) {
+		hdd_err("HDD context is NULL");
+		return false;
+	}
+
+	hdd_for_each_adapter_dev_held_safe(hdd_ctx, adapter, next_adapter,
+					   dbgid) {
+		hdd_sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
+		if (QDF_STA_MODE == adapter->device_mode ||
+		    QDF_P2P_CLIENT_MODE == adapter->device_mode) {
+			if (eConnectionState_Associated ==
+				   hdd_sta_ctx->conn_info.conn_state) {
+				hdd_adapter_dev_put_debug(adapter, dbgid);
+				if (next_adapter)
+					hdd_adapter_dev_put_debug(next_adapter,
+								  dbgid);
+				return true;
+			}
+		}
+		hdd_adapter_dev_put_debug(adapter, dbgid);
+	}
+	return false;
 }
 
 /**
@@ -1108,14 +1140,21 @@ static void hdd_save_bss_info(struct hdd_adapter *adapter,
 		hdd_sta_ctx->conn_info.conn_flag.vht_op_present = false;
 	}
 
-	/* Cleanup already existing he info */
-	hdd_cleanup_conn_info(adapter);
+	/*
+	 * Cache connection info only in case of station
+	 */
 
-	/* Cache last connection info */
-	qdf_mem_copy(&hdd_sta_ctx->cache_conn_info, &hdd_sta_ctx->conn_info,
-		     sizeof(hdd_sta_ctx->cache_conn_info));
+	if (adapter->device_mode == QDF_STA_MODE) {
+		/* Cleanup already existing he info */
+		hdd_cleanup_conn_info(adapter);
 
-	hdd_copy_he_operation(hdd_sta_ctx, roam_info);
+		/* Cache last connection info */
+		qdf_mem_copy(&hdd_sta_ctx->cache_conn_info,
+			     &hdd_sta_ctx->conn_info,
+			     sizeof(hdd_sta_ctx->cache_conn_info));
+
+		hdd_copy_he_operation(hdd_sta_ctx, roam_info);
+	}
 }
 
 /**
@@ -1815,53 +1854,78 @@ static void hdd_print_bss_info(struct hdd_station_ctx *hdd_sta_ctx)
 }
 
 /**
- * hdd_pmkid_clear_on_ap_off() - clear pmkid cache when ap off
- * @adapter: pointer to adapter
+ * hdd_cm_set_default_wlm_mode - reset the default wlm mode if
+ *				 wlm_latency_reset_on_disconnect is set.
+ *@adapter: adapter pointer
  *
- * In AP side power off/on case, AP security has been cleanup.
- * The STA side might still cache PMK ID in driver and it will always use
- * PMK cache to connect to AP and get continuously connect failure in SAE
- * security. This function is to detect AP off based on FW reported BMISS
- * event. Meanwhile judge FW reported last RSSI > roaming Low rssi
- * and not less than 20db of host cached RSSI to avoid some false
- * alarm such as normal DUT roll in/out roaming.
- *
- * Return: void
+ * return: None.
  */
-static void hdd_pmkid_clear_on_ap_off(struct hdd_adapter *adapter)
+static void hdd_cm_set_default_wlm_mode(struct hdd_adapter *adapter)
 {
-	struct hdd_station_ctx *sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
-	int8_t cache_rssi = 0;
-	int32_t bmiss_rssi;
+	QDF_STATUS status;
 	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
-	uint8_t lookup_threshold = 0;
-	struct wlan_crypto_pmksa *pmksa;
+	bool reset;
+	uint8_t def_level;
+	mac_handle_t mac_handle;
+	uint16_t vdev_id;
 
-	if (sta_ctx->conn_info.auth_type != eCSR_AUTH_TYPE_SAE)
+	if (!hdd_ctx) {
+		hdd_err("hdd_ctx is NULL");
 		return;
-	hdd_get_rssi_snr_by_bssid(adapter, sta_ctx->conn_info.bssid.bytes,
-				  &cache_rssi, NULL);
-	sme_get_neighbor_lookup_rssi_threshold(hdd_ctx->mac_handle,
-					       adapter->vdev_id,
-					       &lookup_threshold);
-	bmiss_rssi = adapter->rssi_on_disconnect;
-	if (!bmiss_rssi || !lookup_threshold || !cache_rssi)
+	}
+
+	status = ucfg_mlme_cfg_get_wlm_reset(hdd_ctx->psoc, &reset);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		hdd_err("could not get wlm reset flag");
 		return;
-	hdd_nofl_debug("sta bmiss on rssi %d scan rssi %d th %d", bmiss_rssi,
-		       cache_rssi, lookup_threshold);
-	if (bmiss_rssi > (lookup_threshold * (-1))) {
-		if (bmiss_rssi + AP_OFF_RSSI_OFFSET > cache_rssi) {
-			pmksa = qdf_mem_malloc(sizeof(*pmksa));
-			if (!pmksa)
-				return;
-			qdf_mem_copy(pmksa->bssid.bytes,
-				     sta_ctx->conn_info.bssid.bytes,
-				     sizeof(tSirMacAddr));
-			sme_roam_del_pmkid_from_cache(hdd_ctx->mac_handle,
-						      adapter->vdev_id,
-						      pmksa, false);
-			qdf_mem_free(pmksa);
-		}
+	}
+	if (!reset)
+		return;
+
+	status = ucfg_mlme_cfg_get_wlm_level(hdd_ctx->psoc, &def_level);
+	if (QDF_IS_STATUS_ERROR(status))
+		def_level = QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_NORMAL;
+
+	mac_handle = hdd_ctx->mac_handle;
+	vdev_id = adapter->vdev_id;
+
+	status = sme_set_wlm_latency_level(mac_handle, vdev_id, def_level);
+	if (QDF_IS_STATUS_SUCCESS(status)) {
+		hdd_debug("reset wlm mode %x on disconnection", def_level);
+		adapter->latency_level = def_level;
+	} else {
+		hdd_err("reset wlm mode failed: %d", status);
+	}
+}
+
+/**
+ * hdd_reset_udp_qos_upgrade_config() - Reset the threshold for UDP packet
+ * QoS upgrade.
+ * @adapter: adapter for which this configuration is to be applied
+ *
+ * Return: None
+ */
+static void hdd_reset_udp_qos_upgrade_config(struct hdd_adapter *adapter)
+{
+	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
+	bool reset;
+	QDF_STATUS status;
+
+	if (!hdd_ctx) {
+		hdd_err("hdd_ctx is NULL");
+		return;
+	}
+
+	status = ucfg_mlme_cfg_get_wlm_reset(hdd_ctx->psoc, &reset);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		hdd_err("could not get the wlm reset flag");
+		return;
+	}
+
+	if (reset) {
+		adapter->upgrade_udp_qos_threshold = QCA_WLAN_AC_BK;
+		hdd_debug("UDP packets qos upgrade to: %d",
+			  adapter->upgrade_udp_qos_threshold);
 	}
 }
 
@@ -1916,6 +1980,8 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 				  WLAN_IPA_STA_DISCONNECT,
 				  sta_ctx->conn_info.bssid.bytes);
 
+	hdd_cm_set_default_wlm_mode(adapter);
+	hdd_reset_udp_qos_upgrade_config(adapter);
 	hdd_periodic_sta_stats_stop(adapter);
 
 #ifdef FEATURE_WLAN_AUTO_SHUTDOWN
@@ -1950,38 +2016,12 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 		hdd_conn_set_connection_state(adapter,
 					      eConnectionState_Disconnecting);
 	}
-
+	hdd_clear_roam_profile_ie(adapter);
 	hdd_wmm_dscp_initial_state(adapter);
 	wlan_deregister_txrx_packetdump(OL_TXRX_PDEV_ID);
 
 	/* indicate 'disconnect' status to wpa_supplicant... */
 	hdd_send_association_event(dev, roam_info);
-
-	/*
-	 * Following code will be cleaned once the interface manager
-	 * module is enabled.
-	 */
-#ifndef WLAN_FEATURE_INTERFACE_MGR
-	/*
-	 * Due to audio share glitch with P2P clients due
-	 * to roam scan on concurrent interface, disable
-	 * roaming if "p2p_disable_roam" ini is enabled.
-	 * Re-enable roaming again once the p2p client
-	 * gets disconnected.
-	 */
-	if (ucfg_p2p_is_roam_config_disabled(hdd_ctx->psoc) &&
-	    adapter->device_mode == QDF_P2P_CLIENT_MODE) {
-		hdd_debug("P2P client disconnected, enable roam");
-		wlan_hdd_enable_roaming(adapter, RSO_CONNECT_START);
-	}
-#endif
-	wlan_rec_conn_info(adapter->vdev_id, DEBUG_CONN_DISCONNECT_HANDLER,
-			   sta_ctx->conn_info.bssid.bytes,
-			   (roam_result << 24) | (roam_status << 16) |
-			   (sta_ctx->conn_info.conn_state << 8) |
-			    send_discon_ind,
-			   (roam_info ? roam_info->status_code : 0) << 16 |
-			   (roam_info ? roam_info->disassoc_reason : 0));
 
 	/* indicate disconnected event to nl80211 */
 	/*
@@ -2017,15 +2057,10 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 						disconnect_ies.data,
 						disconnect_ies.len);
 	}
-	if (adapter->device_mode == QDF_STA_MODE &&
-	    roam_status == eCSR_ROAM_LOSTLINK &&
-	    reason_code == REASON_BEACON_MISSED)
-		hdd_pmkid_clear_on_ap_off(adapter);
 
-	hdd_clear_roam_profile_ie(adapter);
 	/* update P2P connection status */
 	ucfg_p2p_status_disconnect(adapter->vdev);
-
+	hdd_cfr_disconnect(adapter->vdev);
 	if (adapter->device_mode == QDF_STA_MODE) {
 		/* Inform BLM about the disconnection with the AP */
 		ucfg_blm_update_bssid_connect_params(hdd_ctx->pdev,
@@ -2069,6 +2104,14 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 
 	/* Clear saved connection information in HDD */
 	hdd_conn_remove_connect_info(sta_ctx);
+
+	/* Setting the RTS profile to original value */
+	if (sme_cli_set_command(adapter->vdev_id, WMI_VDEV_PARAM_ENABLE_RTSCTS,
+				cfg_get(hdd_ctx->psoc,
+					CFG_ENABLE_FW_RTS_PROFILE),
+				VDEV_CMD))
+		hdd_debug("Failed to set RTS_PROFILE");
+
 	/*
 	* eConnectionState_Connecting state mean that connection is in
 	* progress so no need to set state to eConnectionState_NotConnected
@@ -2088,14 +2131,6 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 	}
 	wlan_hdd_clear_link_layer_stats(adapter);
 
-	/*
-	 * Following code will be cleaned once the interface manager
-	 * module is enabled.
-	 */
-#ifndef WLAN_FEATURE_INTERFACE_MGR
-	policy_mgr_check_concurrent_intf_and_restart_sap(hdd_ctx->psoc);
-#endif
-
 	adapter->hdd_stats.tx_rx_stats.cont_txtimeout_cnt = 0;
 
 	/*
@@ -2106,11 +2141,8 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 	 */
 	sta_ctx->hdd_reassoc_scenario = false;
 
-	/*
-	* Following code will be cleaned once the interface manager
-	* module is enabled.
-	*/
-#ifdef WLAN_FEATURE_INTERFACE_MGR
+	wlan_twt_concurrency_update(hdd_ctx);
+
 	vdev = hdd_objmgr_get_vdev(adapter);
 	if (vdev) {
 		ucfg_if_mgr_deliver_event(vdev,
@@ -2118,15 +2150,6 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 					  NULL);
 		hdd_objmgr_put_vdev(vdev);
 	}
-#else
-	if (policy_mgr_is_sta_active_connection_exists(hdd_ctx->psoc) &&
-	    QDF_STA_MODE == adapter->device_mode) {
-		sme_enable_roaming_on_connected_sta(mac_handle,
-						    adapter->vdev_id);
-		policy_mgr_set_pcl_for_connected_vdev(hdd_ctx->psoc,
-						      adapter->vdev_id, true);
-	}
-#endif
 
 	/* Unblock anyone waiting for disconnect to complete */
 	complete(&adapter->disconnect_comp_var);
@@ -2701,6 +2724,15 @@ static int hdd_change_sta_state_authenticated(struct hdd_adapter *adapter,
 
 	mac_addr = hddstactx->conn_info.bssid.bytes;
 
+	if (ucfg_ipa_is_enabled() && !hddstactx->conn_info.is_authenticated &&
+	    adapter->device_mode == QDF_STA_MODE &&
+	    hddstactx->conn_info.auth_type != eCSR_AUTH_TYPE_NONE &&
+	    hddstactx->conn_info.auth_type != eCSR_AUTH_TYPE_OPEN_SYSTEM &&
+	    hddstactx->conn_info.auth_type != eCSR_AUTH_TYPE_SHARED_KEY)
+		ucfg_ipa_wlan_evt(adapter->hdd_ctx->pdev, adapter->dev,
+				  adapter->device_mode, adapter->vdev_id,
+				  WLAN_IPA_STA_CONNECT, mac_addr);
+
 	hdd_debug("Changing Peer state to AUTHENTICATED for Sta = "
 		  QDF_MAC_ADDR_FMT, QDF_MAC_ADDR_REF(mac_addr));
 
@@ -2934,9 +2966,7 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 	mac_handle_t mac_handle;
 	uint32_t conn_info_freq;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
-#ifdef WLAN_FEATURE_INTERFACE_MGR
 	struct if_mgr_event_data *connect_complete;
-#endif
 
 	if (!hdd_ctx) {
 		hdd_err("HDD context is NULL");
@@ -2999,38 +3029,6 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 			hdd_conn_set_connection_state(adapter,
 						   eConnectionState_Associated);
 		}
-		/*
-		 * Following code will be cleaned once the interface manager
-		 * module is enabled.
-		 */
-#ifndef WLAN_FEATURE_INTERFACE_MGR
-		/*
-		 * Due to audio share glitch with P2P clients caused
-		 * by roam scan on concurrent interface, disable
-		 * roaming if "p2p_disable_roam" ini is enabled.
-		 * Donot re-enable roaming again on other STA interface
-		 * if p2p client connection is active on any vdev.
-		 */
-		if (ucfg_p2p_is_roam_config_disabled(hdd_ctx->psoc) &&
-		    adapter->device_mode == QDF_P2P_CLIENT_MODE) {
-			hdd_debug("p2p cli active keep roam disabled");
-		} else {
-			/*
-			 * On successful association. set the vdev PCL for the
-			 * already existing STA which was connected first
-			 */
-			policy_mgr_set_pcl_for_connected_vdev(hdd_ctx->psoc,
-							      adapter->vdev_id,
-							      false);
-
-			/*
-			 * Enable roaming on other STA iface except this one.
-			 * Firmware dosent support connection on one STA iface
-			 * while roaming on other STA iface
-			 */
-			wlan_hdd_enable_roaming(adapter, RSO_CONNECT_START);
-		}
-#endif
 		/* Save the connection info from CSR... */
 		hdd_conn_save_connect_info(adapter, roam_info,
 					   eCSR_BSS_TYPE_INFRASTRUCTURE);
@@ -3117,7 +3115,7 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 			ft_carrier_on = true;
 		}
 
-		if (ucfg_ipa_is_enabled())
+		if (ucfg_ipa_is_enabled() && !roam_info->fAuthRequired)
 			ucfg_ipa_wlan_evt(hdd_ctx->pdev, adapter->dev,
 					  adapter->device_mode,
 					  adapter->vdev_id,
@@ -3221,7 +3219,9 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 				(u8 *) (roam_info->pbFrames +
 					roam_info->nBeaconLength +
 					roam_info->nAssocReqLength);
-			if (assoc_rsp) {
+			if (assoc_rsp &&
+			    roam_info->nAssocRspLength >
+			    ASSOC_RSP_IES_OFFSET) {
 				/*
 				 * assoc_rsp needs to point to the IEs
 				 */
@@ -3240,7 +3240,9 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 			assoc_req = (u8 *) (roam_info->pbFrames +
 					      roam_info->nBeaconLength);
 			if (assoc_req) {
-				if (!ft_carrier_on) {
+				if (!ft_carrier_on &&
+				    roam_info->nAssocReqLength >
+				    ASSOC_REQ_IES_OFFSET) {
 					/*
 					 * assoc_req needs to point to
 					 * the IEs
@@ -3498,11 +3500,12 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 						   WLAN_ALL_SESSIONS_DIALOG_ID);
 		}
 
+		wlan_twt_concurrency_update(hdd_ctx);
+
 		/*
 		 * Following code will be cleaned once the interface manager
 		 * module is enabled.
 		 */
-#ifdef WLAN_FEATURE_INTERFACE_MGR
 		connect_complete = qdf_mem_malloc(sizeof(*connect_complete));
 		if (!connect_complete)
 			return QDF_STATUS_E_NOMEM;
@@ -3514,12 +3517,6 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 					  WLAN_IF_MGR_EV_CONNECT_COMPLETE,
 					  connect_complete);
 		qdf_mem_free(connect_complete);
-#else
-		policy_mgr_check_n_start_opportunistic_timer(hdd_ctx->psoc);
-		hdd_debug("check for SAP restart");
-		policy_mgr_check_concurrent_intf_and_restart_sap(
-			hdd_ctx->psoc);
-#endif
 	} else {
 		bool connect_timeout = false;
 		if (roam_info && roam_info->is_fils_connection &&
@@ -3596,7 +3593,9 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 					assoc_req =
 						(u8 *)(roam_info->pbFrames +
 						       roam_info->nBeaconLength);
-					if (assoc_req) {
+					if (assoc_req &&
+					    roam_info->nAssocReqLength >
+					    ASSOC_REQ_IES_OFFSET) {
 						/*
 						 * assoc_req needs to point to
 						 * the IEs
@@ -3615,7 +3614,9 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 						(u8 *)(roam_info->pbFrames +
 						      roam_info->nBeaconLength +
 						    roam_info->nAssocReqLength);
-					if (assoc_rsp) {
+					if (assoc_rsp &&
+					    roam_info->nAssocRspLength >
+					    ASSOC_RSP_IES_OFFSET) {
 						/*
 						 * assoc_rsp needs to point to the IEs
 						 */
@@ -3744,11 +3745,6 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 
 		if (roam_status == eCSR_ROAM_ASSOCIATION_FAILURE ||
 		    roam_status == eCSR_ROAM_CANCELLED) {
-			/*
-			 * Following code will be cleaned once the interface
-			 * manager module is enabled.
-			 */
-#ifdef WLAN_FEATURE_INTERFACE_MGR
 			connect_complete =
 				qdf_mem_malloc(sizeof(*connect_complete));
 			if (!connect_complete)
@@ -3757,29 +3753,13 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 			qdf_mem_zero(connect_complete,
 				     sizeof(*connect_complete));
 
+			wlan_twt_concurrency_update(hdd_ctx);
 			connect_complete->status = QDF_STATUS_E_FAILURE;
 			ucfg_if_mgr_deliver_event(adapter->vdev,
 					WLAN_IF_MGR_EV_CONNECT_COMPLETE,
 					connect_complete);
 			qdf_mem_free(connect_complete);
 		}
-#else
-			/* notify connect failure on final failure */
-			ucfg_tdls_notify_connect_failure(hdd_ctx->psoc);
-			/* do we need to change the HW mode on final failure */
-			policy_mgr_check_n_start_opportunistic_timer(
-								hdd_ctx->psoc);
-
-			/*
-			 * Enable roaming on other STA iface except this one.
-			 * Firmware dosent support connection on one STA iface
-			 * while roaming on other STA iface
-			 */
-			wlan_hdd_enable_roaming(adapter, RSO_CONNECT_START);
-		}
-
-		policy_mgr_check_concurrent_intf_and_restart_sap(hdd_ctx->psoc);
-#endif
 	}
 
 	hdd_periodic_sta_stats_start(adapter);
@@ -4492,6 +4472,7 @@ static void hdd_roam_channel_switch_handler(struct hdd_adapter *adapter,
 		hdd_debug("set hw mode change not done");
 
 	policy_mgr_check_concurrent_intf_and_restart_sap(hdd_ctx->psoc);
+	wlan_twt_concurrency_update(hdd_ctx);
 }
 
 #ifdef WLAN_FEATURE_HOST_ROAM

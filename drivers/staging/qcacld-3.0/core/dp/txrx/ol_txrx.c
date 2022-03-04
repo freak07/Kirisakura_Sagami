@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1013,8 +1013,10 @@ void htt_pkt_log_init(struct cdp_soc_t *soc_hdl, uint8_t pdev_id, void *scn)
 	ol_txrx_pdev_handle handle =
 				ol_txrx_get_pdev_from_pdev_id(soc, pdev_id);
 
-	if (handle->pkt_log_init)
+	if (handle->pkt_log_init) {
+		ol_txrx_err("pktlog already initialized");
 		return;
+	}
 
 	if (cds_get_conparam() != QDF_GLOBAL_FTM_MODE &&
 			!QDF_IS_EPPING_ENABLED(cds_get_conparam())) {
@@ -1025,6 +1027,8 @@ void htt_pkt_log_init(struct cdp_soc_t *soc_hdl, uint8_t pdev_id, void *scn)
 			qdf_print(" pktlogmod_init failed");
 		else
 			handle->pkt_log_init = true;
+	} else {
+		ol_txrx_err("Invalid conn mode: %d", cds_get_conparam());
 	}
 }
 
@@ -1037,11 +1041,17 @@ void htt_pkt_log_init(struct cdp_soc_t *soc_hdl, uint8_t pdev_id, void *scn)
  */
 static void htt_pktlogmod_exit(struct ol_txrx_pdev_t *handle)
 {
+	if (!handle->pkt_log_init) {
+		ol_txrx_err("pktlog is not initialized");
+		return;
+	}
+
 	if (cds_get_conparam() != QDF_GLOBAL_FTM_MODE &&
-		!QDF_IS_EPPING_ENABLED(cds_get_conparam()) &&
-			handle->pkt_log_init) {
+		!QDF_IS_EPPING_ENABLED(cds_get_conparam())) {
 		pktlogmod_exit(handle);
 		handle->pkt_log_init = false;
+	} else {
+		ol_txrx_err("Invalid conn mode: %d", cds_get_conparam());
 	}
 }
 
@@ -1443,9 +1453,18 @@ ol_txrx_pdev_post_attach(struct cdp_soc_t *soc_hdl, uint8_t pdev_id)
 	pdev->rx_pn[htt_sec_type_tkip].len =
 		pdev->rx_pn[htt_sec_type_tkip_nomic].len =
 			pdev->rx_pn[htt_sec_type_aes_ccmp].len = 48;
+
+	pdev->rx_pn[htt_sec_type_aes_ccmp_256].len =
+		pdev->rx_pn[htt_sec_type_aes_gcmp].len =
+			pdev->rx_pn[htt_sec_type_aes_gcmp_256].len = 48;
+
 	pdev->rx_pn[htt_sec_type_tkip].cmp =
 		pdev->rx_pn[htt_sec_type_tkip_nomic].cmp =
 			pdev->rx_pn[htt_sec_type_aes_ccmp].cmp = ol_rx_pn_cmp48;
+
+	pdev->rx_pn[htt_sec_type_aes_ccmp_256].cmp =
+		pdev->rx_pn[htt_sec_type_aes_gcmp].cmp =
+		    pdev->rx_pn[htt_sec_type_aes_gcmp_256].cmp = ol_rx_pn_cmp48;
 
 	/* WAPI: 128-bit PN */
 	pdev->rx_pn[htt_sec_type_wapi].len = 128;
@@ -3653,6 +3672,36 @@ static void ol_txrx_peer_unmap_sync_cb_set(
 }
 
 /**
+ * ol_txrx_peer_flush_frags() - Flush fragments for a particular peer
+ * @soc_hdl - datapath soc handle
+ * @vdev_id - virtual device id
+ * @peer_mac - peer mac address
+ *
+ * Return: None
+ */
+static void
+ol_txrx_peer_flush_frags(struct cdp_soc_t *soc_hdl, uint8_t vdev_id,
+			 uint8_t *peer_mac)
+{
+	struct ol_txrx_peer_t *peer;
+	struct ol_txrx_soc_t *soc = cdp_soc_t_to_ol_txrx_soc_t(soc_hdl);
+	struct ol_txrx_pdev_t *pdev =
+		ol_txrx_get_pdev_from_pdev_id(soc, OL_TXRX_PDEV_ID);
+
+	if (!pdev)
+		return;
+
+	peer =  ol_txrx_peer_find_hash_find_get_ref(pdev, peer_mac, 0, 1,
+						    PEER_DEBUG_ID_OL_INTERNAL);
+	if (!peer)
+		return;
+
+	ol_rx_reorder_peer_cleanup(peer->vdev, peer);
+
+	ol_txrx_peer_release_ref(peer, PEER_DEBUG_ID_OL_INTERNAL);
+}
+
+/**
  * ol_txrx_dump_tx_desc() - dump tx desc total and free count
  * @txrx_pdev: Pointer to txrx pdev
  *
@@ -5714,6 +5763,7 @@ static void ol_txrx_soc_detach(struct cdp_soc_t *soc)
 	qdf_mem_free(soc);
 }
 
+#ifdef REMOVE_PKT_LOG
 /**
  * ol_txrx_pkt_log_con_service() - connect packet log service
  * @soc_hdl: Datapath soc handle
@@ -5722,17 +5772,41 @@ static void ol_txrx_soc_detach(struct cdp_soc_t *soc)
  *
  * Return: noe
  */
-#ifdef REMOVE_PKT_LOG
 static void ol_txrx_pkt_log_con_service(struct cdp_soc_t *soc_hdl,
 					uint8_t pdev_id, void *scn)
 {
 }
+
+/**
+ * ol_txrx_pkt_log_exit() - cleanup packet log info
+ * @soc_hdl: Datapath soc handle
+ * @pdev_id: id of data path pdev handle
+ *
+ * Return: noe
+ */
+static void ol_txrx_pkt_log_exit(struct cdp_soc_t *soc_hdl, uint8_t pdev_id)
+{
+}
+
 #else
 static void ol_txrx_pkt_log_con_service(struct cdp_soc_t *soc_hdl,
 					uint8_t pdev_id, void *scn)
 {
 	htt_pkt_log_init(soc_hdl, pdev_id, scn);
 	pktlog_htc_attach();
+}
+
+static void ol_txrx_pkt_log_exit(struct cdp_soc_t *soc_hdl, uint8_t pdev_id)
+{
+	struct ol_txrx_soc_t *soc = cdp_soc_t_to_ol_txrx_soc_t(soc_hdl);
+	ol_txrx_pdev_handle pdev = ol_txrx_get_pdev_from_pdev_id(soc, pdev_id);
+
+	if (!pdev) {
+		ol_txrx_err("pdev handle is NULL");
+		return;
+	}
+
+	htt_pktlogmod_exit(pdev);
 }
 #endif
 
@@ -6121,6 +6195,7 @@ static struct cdp_misc_ops ol_ops_misc = {
 	.get_intra_bss_fwd_pkts_count = ol_get_intra_bss_fwd_pkts_count,
 	.pkt_log_init = htt_pkt_log_init,
 	.pkt_log_con_service = ol_txrx_pkt_log_con_service,
+	.pkt_log_exit = ol_txrx_pkt_log_exit,
 	.register_pktdump_cb = ol_register_packetdump_callback,
 	.unregister_pktdump_cb = ol_deregister_packetdump_callback,
 #ifdef QCA_SUPPORT_TXRX_DRIVER_TCP_DEL_ACK
@@ -6268,6 +6343,7 @@ static struct cdp_peer_ops ol_ops_peer = {
 	.set_peer_as_tdls_peer = ol_txrx_set_peer_as_tdls_peer,
 #endif /* CONFIG_HL_SUPPORT */
 	.peer_detach_force_delete = ol_txrx_peer_detach_force_delete,
+	.peer_flush_frags = ol_txrx_peer_flush_frags,
 };
 
 static struct cdp_tx_delay_ops ol_ops_delay = {

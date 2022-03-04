@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -33,6 +34,7 @@
 #include "cfg_ucfg_api.h"
 #include "cfg_nan.h"
 #include "wlan_mlme_api.h"
+#include "cfg_nan_api.h"
 
 struct wlan_objmgr_psoc;
 struct wlan_objmgr_vdev;
@@ -181,6 +183,92 @@ inline QDF_STATUS ucfg_nan_set_active_peers(struct wlan_objmgr_vdev *vdev,
 	qdf_spin_unlock_bh(&priv_obj->lock);
 
 	return QDF_STATUS_SUCCESS;
+}
+
+inline void ucfg_nan_set_peer_mc_list(struct wlan_objmgr_vdev *vdev,
+				      struct qdf_mac_addr peer_mac_addr)
+{
+	struct nan_vdev_priv_obj *priv_obj = nan_get_vdev_priv_obj(vdev);
+	uint32_t max_ndp_sessions = 0;
+	struct wlan_objmgr_psoc *psoc = wlan_vdev_get_psoc(vdev);
+	int i, list_idx = 0;
+
+	if (!priv_obj) {
+		nan_err("priv_obj is null");
+		return;
+	}
+
+	if (!psoc) {
+		nan_err("psoc is null");
+		return;
+	}
+
+	cfg_nan_get_ndp_max_sessions(psoc, &max_ndp_sessions);
+
+	qdf_spin_lock_bh(&priv_obj->lock);
+	for (i = 0; i < max_ndp_sessions; i++) {
+		if (qdf_is_macaddr_zero(&priv_obj->peer_mc_addr_list[i])) {
+			list_idx = i;
+			break;
+		}
+	}
+	if (list_idx == max_ndp_sessions) {
+		nan_err("Peer multicast address list is full");
+		goto end;
+	}
+	/* Derive peer multicast addr */
+	peer_mac_addr.bytes[0] = 0x33;
+	peer_mac_addr.bytes[1] = 0x33;
+	peer_mac_addr.bytes[2] = 0xff;
+	priv_obj->peer_mc_addr_list[list_idx] = peer_mac_addr;
+
+end:
+	qdf_spin_unlock_bh(&priv_obj->lock);
+}
+
+inline void ucfg_nan_get_peer_mc_list(
+				struct wlan_objmgr_vdev *vdev,
+				struct qdf_mac_addr **peer_mc_addr_list)
+{
+	struct nan_vdev_priv_obj *priv_obj = nan_get_vdev_priv_obj(vdev);
+
+	if (!priv_obj) {
+		nan_err("priv_obj is null");
+		return;
+	}
+
+	*peer_mc_addr_list = priv_obj->peer_mc_addr_list;
+}
+
+inline void ucfg_nan_clear_peer_mc_list(struct wlan_objmgr_psoc *psoc,
+					struct wlan_objmgr_vdev *vdev,
+					struct qdf_mac_addr *peer_mac_addr)
+{
+	struct nan_vdev_priv_obj *priv_obj = nan_get_vdev_priv_obj(vdev);
+	int i;
+	uint32_t max_ndp_sessions = 0;
+	struct qdf_mac_addr derived_peer_mc_addr;
+
+	if (!priv_obj) {
+		nan_err("priv_obj is null");
+		return;
+	}
+
+	/* Derive peer multicast addr */
+	derived_peer_mc_addr = *peer_mac_addr;
+	derived_peer_mc_addr.bytes[0] = 0x33;
+	derived_peer_mc_addr.bytes[1] = 0x33;
+	derived_peer_mc_addr.bytes[2] = 0xff;
+	qdf_spin_lock_bh(&priv_obj->lock);
+	cfg_nan_get_ndp_max_sessions(psoc, &max_ndp_sessions);
+	for (i = 0; i < max_ndp_sessions; i++) {
+		if (qdf_is_macaddr_equal(&priv_obj->peer_mc_addr_list[i],
+					 &derived_peer_mc_addr)) {
+			qdf_zero_macaddr(&priv_obj->peer_mc_addr_list[i]);
+			break;
+		}
+	}
+	qdf_spin_unlock_bh(&priv_obj->lock);
 }
 
 inline uint32_t ucfg_nan_get_active_peers(struct wlan_objmgr_vdev *vdev)
@@ -398,7 +486,7 @@ QDF_STATUS ucfg_nan_req_processor(struct wlan_objmgr_vdev *vdev,
 	struct scheduler_msg msg = {0};
 	int err;
 	struct nan_psoc_priv_obj *psoc_obj = NULL;
-	struct osif_request *request;
+	struct osif_request *request = NULL;
 	static const struct osif_request_params params = {
 		.priv_size = 0,
 		.timeout_ms = WLAN_WAIT_TIME_NDP_END,
@@ -423,6 +511,12 @@ QDF_STATUS ucfg_nan_req_processor(struct wlan_objmgr_vdev *vdev,
 			nan_err("nan psoc priv object is NULL");
 			return QDF_STATUS_E_INVAL;
 		}
+		request = osif_request_alloc(&params);
+		if (!request) {
+			nan_err("Request allocation failure");
+			return QDF_STATUS_E_NOMEM;
+		}
+		psoc_obj->ndp_request_ctx = osif_request_cookie(request);
 		break;
 	case NDP_END_ALL:
 		len = sizeof(struct nan_datapath_end_all_ndps);
@@ -433,8 +527,10 @@ QDF_STATUS ucfg_nan_req_processor(struct wlan_objmgr_vdev *vdev,
 	}
 
 	msg.bodyptr = qdf_mem_malloc(len);
-	if (!msg.bodyptr)
-		return QDF_STATUS_E_NOMEM;
+	if (!msg.bodyptr) {
+		status = QDF_STATUS_E_NOMEM;
+		goto fail;
+	}
 
 	qdf_mem_copy(msg.bodyptr, in_req, len);
 	msg.type = req_type;
@@ -446,32 +542,27 @@ QDF_STATUS ucfg_nan_req_processor(struct wlan_objmgr_vdev *vdev,
 	if (QDF_IS_STATUS_ERROR(status)) {
 		nan_err("failed to post msg to NAN component, status: %d",
 			status);
-		qdf_mem_free(msg.bodyptr);
-		return status;
+		goto fail;
 	}
 
 	if (req_type == NDP_END_REQ) {
-		/* Wait for NDP_END indication */
-		if (!psoc_obj) {
-			nan_err("nan psoc priv object is NULL");
-			return QDF_STATUS_E_INVAL;
-		}
-		request = osif_request_alloc(&params);
-		if (!request) {
-			nan_err("Request allocation failure");
-			return QDF_STATUS_E_NOMEM;
-		}
-		psoc_obj->request_context = osif_request_cookie(request);
-
 		nan_debug("Wait for NDP END indication");
 		err = osif_request_wait_for_response(request);
 		if (err)
 			nan_debug("NAN request timed out: %d", err);
 		osif_request_put(request);
-		psoc_obj->request_context = NULL;
+		psoc_obj->ndp_request_ctx = NULL;
 	}
 
 	return QDF_STATUS_SUCCESS;
+
+fail:
+	qdf_mem_free(msg.bodyptr);
+	if (req_type == NDP_END_REQ) {
+		osif_request_put(request);
+		psoc_obj->ndp_request_ctx = NULL;
+	}
+	return status;
 }
 
 void ucfg_nan_datapath_event_handler(struct wlan_objmgr_psoc *psoc,
@@ -529,6 +620,8 @@ int ucfg_nan_register_hdd_callbacks(struct wlan_objmgr_psoc *psoc,
 				cb_obj->os_if_nan_event_handler;
 	psoc_obj->cb_obj.ucfg_nan_request_process_cb =
 				ucfg_nan_request_process_cb;
+	psoc_obj->cb_obj.nan_concurrency_update =
+				cb_obj->nan_concurrency_update;
 
 	return 0;
 }
@@ -760,7 +853,7 @@ QDF_STATUS ucfg_nan_discovery_req(void *in_req, uint32_t req_type)
 		return QDF_STATUS_E_NOMEM;
 	}
 
-	psoc_priv->request_context = osif_request_cookie(request);
+	psoc_priv->nan_disc_request_ctx = osif_request_cookie(request);
 	if (req_type == NAN_DISABLE_REQ)
 		psoc_priv->is_explicit_disable = true;
 
@@ -1304,15 +1397,5 @@ QDF_STATUS ucfg_nan_disable_ind_to_userspace(struct wlan_objmgr_psoc *psoc)
 
 bool ucfg_is_nan_allowed_on_freq(struct wlan_objmgr_pdev *pdev, uint32_t freq)
 {
-	bool nan_allowed = false;
-
-	/* Check for SRD channels only */
-	if (!wlan_reg_is_etsi13_srd_chan_for_freq(pdev, freq))
-		return true;
-
-	wlan_mlme_get_srd_master_mode_for_vdev(wlan_pdev_get_psoc(pdev),
-					       QDF_NAN_DISC_MODE,
-					       &nan_allowed);
-
-	return nan_allowed;
+	return wlan_is_nan_allowed_on_freq(pdev, freq);
 }

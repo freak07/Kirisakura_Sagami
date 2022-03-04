@@ -161,6 +161,36 @@ static void lim_extract_he_op(struct pe_session *session,
 	}
 }
 
+static bool lim_validate_he160_mcs_map(struct mac_context *mac_ctx,
+				       uint16_t peer_rx, uint16_t peer_tx,
+				       uint8_t nss)
+{
+	uint16_t rx_he_mcs_map;
+	uint16_t tx_he_mcs_map;
+	uint16_t he_mcs_map;
+
+	he_mcs_map = *((uint16_t *)mac_ctx->mlme_cfg->he_caps.dot11_he_cap.
+				tx_he_mcs_map_160);
+	rx_he_mcs_map = HE_INTERSECT_MCS(peer_rx, he_mcs_map);
+
+	he_mcs_map = *((uint16_t *)mac_ctx->mlme_cfg->he_caps.dot11_he_cap.
+				rx_he_mcs_map_160);
+	tx_he_mcs_map = HE_INTERSECT_MCS(peer_tx, he_mcs_map);
+
+	if (nss == NSS_1x1_MODE) {
+		rx_he_mcs_map |= HE_MCS_INV_MSK_4_NSS(1);
+		tx_he_mcs_map |= HE_MCS_INV_MSK_4_NSS(1);
+	} else if (nss == NSS_2x2_MODE) {
+		rx_he_mcs_map |= (HE_MCS_INV_MSK_4_NSS(1) &
+				HE_MCS_INV_MSK_4_NSS(2));
+		tx_he_mcs_map |= (HE_MCS_INV_MSK_4_NSS(1) &
+				HE_MCS_INV_MSK_4_NSS(2));
+	}
+
+	return ((rx_he_mcs_map != HE_MCS_ALL_DISABLED) &&
+		(tx_he_mcs_map != HE_MCS_ALL_DISABLED));
+}
+
 static void lim_check_is_he_mcs_valid(struct pe_session *session,
 				      tSirProbeRespBeacon *beacon_struct)
 {
@@ -197,14 +227,21 @@ void lim_update_he_bw_cap_mcs(struct pe_session *session,
 	if ((session->opmode == QDF_STA_MODE ||
 	     session->opmode == QDF_P2P_CLIENT_MODE) &&
 	    beacon && beacon->he_cap.present) {
-		if (!beacon->he_cap.chan_width_2)
+		if (!beacon->he_cap.chan_width_2) {
 			is_80mhz = 1;
-		else if (beacon->he_cap.chan_width_2 &&
-			 (*(uint16_t *)beacon->he_cap.rx_he_mcs_map_160 ==
-			  HE_MCS_ALL_DISABLED))
+		} else if (beacon->he_cap.chan_width_2 &&
+			 !lim_validate_he160_mcs_map(session->mac_ctx,
+			   *((uint16_t *)beacon->he_cap.rx_he_mcs_map_160),
+			   *((uint16_t *)beacon->he_cap.tx_he_mcs_map_160),
+						     session->nss)) {
 			is_80mhz = 1;
-		else
+			if (session->ch_width == CH_WIDTH_160MHZ) {
+				pe_debug("HE160 Rx/Tx MCS is not valid, falling back to 80MHz");
+				session->ch_width = CH_WIDTH_80MHZ;
+			}
+		} else {
 			is_80mhz = 0;
+		}
 	} else {
 		is_80mhz = 1;
 	}
@@ -373,6 +410,44 @@ static void lim_check_peer_ldpc_and_update(struct pe_session *session,
 {}
 #endif
 
+static
+void lim_update_ch_width_for_p2p_client(struct mac_context *mac,
+					struct pe_session *session,
+					uint32_t ch_freq)
+{
+	struct ch_params ch_params = {0};
+
+	/*
+	 * Some IOT AP's/P2P-GO's (e.g. make: Wireless-AC 9560160MHz as P2P GO),
+	 * send beacon with 20mhz and assoc resp with 80mhz and
+	 * after assoc resp, next beacon also has 80mhz.
+	 * Connection is expected to happen in better possible
+	 * bandwidth(80MHz in this case).
+	 * Start the vdev with max supported ch_width in order to support this.
+	 * It'll be downgraded to appropriate ch_width or the same would be
+	 * continued based on assoc resp.
+	 * Restricting this check for p2p client and 5G only and this may be
+	 * extended to STA based on wider testing results with multiple AP's.
+	 * Limit it to 80MHz as 80+80 is channel specific and 160MHz is not
+	 * supported in p2p.
+	 */
+	ch_params.ch_width = CH_WIDTH_80MHZ;
+
+	wlan_reg_set_channel_params_for_freq(mac->pdev, ch_freq, 0, &ch_params);
+	if (ch_params.ch_width == CH_WIDTH_20MHZ)
+		ch_params.sec_ch_offset = PHY_SINGLE_CHANNEL_CENTERED;
+
+	session->htSupportedChannelWidthSet = ch_params.sec_ch_offset ? 1 : 0;
+	session->htRecommendedTxWidthSet = session->htSupportedChannelWidthSet;
+	session->htSecondaryChannelOffset = ch_params.sec_ch_offset;
+	session->ch_width = ch_params.ch_width;
+	session->ch_center_freq_seg0 = ch_params.center_freq_seg0;
+	session->ch_center_freq_seg1 = ch_params.center_freq_seg1;
+	pe_debug("Start P2P_CLI in ch freq %d max supported ch_width: %u cbmode: %u seg0: %u, seg1: %u",
+		 ch_freq, ch_params.ch_width, ch_params.sec_ch_offset,
+		 session->ch_center_freq_seg0, session->ch_center_freq_seg1);
+}
+
 void lim_extract_ap_capability(struct mac_context *mac_ctx, uint8_t *p_ie,
 			       uint16_t ie_len, uint8_t *qos_cap,
 			       uint8_t *uapsd, int8_t *local_constraint,
@@ -443,6 +518,13 @@ void lim_extract_ap_capability(struct mac_context *mac_ctx, uint8_t *p_ie,
 			!session->htSupportedChannelWidthSet) {
 		if (!mac_ctx->mlme_cfg->vht_caps.vht_cap_info.enable_txbf_20mhz)
 			session->vht_config.su_beam_formee = 0;
+
+		if (session->opmode == QDF_P2P_CLIENT_MODE &&
+		    !wlan_reg_is_24ghz_ch_freq(beacon_struct->chan_freq))
+			lim_update_ch_width_for_p2p_client(
+					mac_ctx, session,
+					beacon_struct->chan_freq);
+
 	} else if (session->vhtCapabilityPresentInBeacon &&
 			vht_op->chanWidth) {
 		/* If VHT is supported min 80 MHz support is must */

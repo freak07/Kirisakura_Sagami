@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -29,6 +30,7 @@
 #include "qdf_status.h"
 #include "nan_public_structs.h"
 #include "wlan_objmgr_cmn.h"
+#include "cfg_nan.h"
 
 struct wlan_objmgr_vdev;
 struct wlan_objmgr_psoc;
@@ -118,7 +120,8 @@ struct nan_cfg_params {
  * @nan_disc_mac_id: MAC id used for NAN Discovery
  * @is_explicit_disable: Flag to indicate that NAN is being explicitly
  * disabled by driver or user-space
- * @request_context: NAN enable/disable request context
+ * @ndp_request_ctx: NDP request context
+ * @nan_disc_request_ctx: NAN discovery enable/disable request context
  */
 struct nan_psoc_priv_obj {
 	qdf_spinlock_t lock;
@@ -132,7 +135,8 @@ struct nan_psoc_priv_obj {
 	uint32_t nan_social_ch_5g_freq;
 	uint8_t nan_disc_mac_id;
 	bool is_explicit_disable;
-	void *request_context;
+	void *ndp_request_ctx;
+	void *nan_disc_request_ctx;
 };
 
 /**
@@ -148,6 +152,7 @@ struct nan_psoc_priv_obj {
  * @disable_context: Disable all NDP's operation context
  * @ndp_init_done: Flag to indicate NDP initialization complete after first peer
  *		   connection.
+ * @peer_mc_addr_list: Peer multicast address list
  */
 struct nan_vdev_priv_obj {
 	qdf_spinlock_t lock;
@@ -160,6 +165,7 @@ struct nan_vdev_priv_obj {
 	struct qdf_mac_addr primary_peer_mac;
 	void *disable_context;
 	bool ndp_init_done;
+	struct qdf_mac_addr peer_mc_addr_list[MAX_NDP_SESSIONS];
 };
 
 /**

@@ -35,6 +35,7 @@
 #define PLD_SETUP_FILE               "athsetup.bin"
 #define PLD_EPPING_FILE              "epping.bin"
 #define PLD_EVICTED_FILE             ""
+#define PLD_MHI_STATE_L0	1
 
 #define TOTAL_DUMP_SIZE         0x00200000
 
@@ -149,6 +150,7 @@ enum pld_uevent {
 	PLD_FW_CRASHED,
 	PLD_FW_RECOVERY_START,
 	PLD_FW_HANG_EVENT,
+	PLD_SMMU_FAULT,
 };
 
 /**
@@ -704,6 +706,8 @@ int pld_ce_free_irq(struct device *dev, unsigned int ce_id, void *ctx);
 void pld_enable_irq(struct device *dev, unsigned int ce_id);
 void pld_disable_irq(struct device *dev, unsigned int ce_id);
 int pld_get_soc_info(struct device *dev, struct pld_soc_info *info);
+int pld_get_mhi_state(struct device *dev);
+int pld_is_pci_ep_awake(struct device *dev);
 int pld_get_ce_id(struct device *dev, int irq);
 int pld_get_irq(struct device *dev, int ce_id);
 void pld_lock_pm_sem(struct device *dev);
@@ -751,6 +755,15 @@ int pld_qmi_send(struct device *dev, int type, void *cmd,
 		 int cmd_len, void *cb_ctx,
 		 int (*cb)(void *ctx, void *event, int event_len));
 bool pld_is_fw_dump_skipped(struct device *dev);
+
+#ifdef CONFIG_ENABLE_LOW_POWER_MODE
+int pld_is_low_power_mode(struct device *dev);
+#else
+static inline int pld_is_low_power_mode(struct device *dev)
+{
+	return 0;
+}
+#endif
 
 /**
  * pld_is_pdr() - Check WLAN PD is Restarted

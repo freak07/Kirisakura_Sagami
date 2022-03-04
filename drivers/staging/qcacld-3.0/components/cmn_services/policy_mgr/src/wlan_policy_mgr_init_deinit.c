@@ -338,9 +338,15 @@ QDF_STATUS policy_mgr_psoc_open(struct wlan_objmgr_psoc *psoc)
 		return QDF_STATUS_E_FAILURE;
 	}
 	pm_ctx->sta_ap_intf_check_work_info->psoc = psoc;
-	qdf_create_work(0, &pm_ctx->sta_ap_intf_check_work,
-			policy_mgr_check_sta_ap_concurrent_ch_intf,
-			pm_ctx->sta_ap_intf_check_work_info);
+	if (QDF_IS_STATUS_ERROR(qdf_delayed_work_create(
+				&pm_ctx->sta_ap_intf_check_work,
+				policy_mgr_check_sta_ap_concurrent_ch_intf,
+				pm_ctx))) {
+		policy_mgr_err("Failed to create dealyed work queue");
+		qdf_mutex_destroy(&pm_ctx->qdf_conc_list_lock);
+		qdf_mem_free(pm_ctx->sta_ap_intf_check_work_info);
+		return QDF_STATUS_E_FAILURE;
+	}
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -369,7 +375,7 @@ QDF_STATUS policy_mgr_psoc_close(struct wlan_objmgr_psoc *psoc)
 	}
 
 	if (pm_ctx->sta_ap_intf_check_work_info) {
-		qdf_cancel_work(&pm_ctx->sta_ap_intf_check_work);
+		qdf_delayed_work_destroy(&pm_ctx->sta_ap_intf_check_work);
 		qdf_mem_free(pm_ctx->sta_ap_intf_check_work_info);
 		pm_ctx->sta_ap_intf_check_work_info = NULL;
 	}
@@ -637,6 +643,22 @@ QDF_STATUS policy_mgr_psoc_disable(struct wlan_objmgr_psoc *psoc)
 	return status;
 }
 
+QDF_STATUS policy_mgr_register_conc_cb(struct wlan_objmgr_psoc *psoc,
+				struct policy_mgr_conc_cbacks *conc_cbacks)
+{
+	struct policy_mgr_psoc_priv_obj *pm_ctx;
+
+	pm_ctx = policy_mgr_get_context(psoc);
+	if (!pm_ctx) {
+		policy_mgr_err("Invalid Context");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	pm_ctx->conc_cbacks.connection_info_update =
+					conc_cbacks->connection_info_update;
+	return QDF_STATUS_SUCCESS;
+}
+
 QDF_STATUS policy_mgr_register_sme_cb(struct wlan_objmgr_psoc *psoc,
 		struct policy_mgr_sme_cbacks *sme_cbacks)
 {
@@ -708,6 +730,8 @@ QDF_STATUS policy_mgr_register_hdd_cb(struct wlan_objmgr_psoc *psoc,
 		hdd_cbacks->hdd_get_ap_6ghz_capable;
 	pm_ctx->hdd_cbacks.wlan_hdd_indicate_active_ndp_cnt =
 		hdd_cbacks->wlan_hdd_indicate_active_ndp_cnt;
+	pm_ctx->hdd_cbacks.wlan_get_ap_prefer_conc_ch_params =
+		hdd_cbacks->wlan_get_ap_prefer_conc_ch_params;
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -729,6 +753,7 @@ QDF_STATUS policy_mgr_deregister_hdd_cb(struct wlan_objmgr_psoc *psoc)
 	pm_ctx->hdd_cbacks.hdd_is_chan_switch_in_progress = NULL;
 	pm_ctx->hdd_cbacks.hdd_is_cac_in_progress = NULL;
 	pm_ctx->hdd_cbacks.hdd_get_ap_6ghz_capable = NULL;
+	pm_ctx->hdd_cbacks.wlan_get_ap_prefer_conc_ch_params = NULL;
 
 	return QDF_STATUS_SUCCESS;
 }
