@@ -790,7 +790,7 @@ struct msm_pcie_dev_t {
 
 	enum msm_pcie_link_status link_status;
 	bool user_suspend;
-	bool disable_pc;
+	uint32_t disable_pc;
 
 	struct pci_saved_state *default_state;
 	struct pci_saved_state *saved_state;
@@ -5941,6 +5941,12 @@ static int msm_pcie_i2c_ctrl_init(struct msm_pcie_dev_t *pcie_dev)
 		PCIE_DBG(pcie_dev, "PCIe: RC%d: No i2c phandle found\n",
 			 pcie_dev->rc_idx);
 		return 0;
+	} else {
+		if (!i2c_ctrl->client) {
+			PCIE_DBG(pcie_dev, "PCIe: RC%d: No i2c probe yet\n",
+				 pcie_dev->rc_idx);
+			return -EPROBE_DEFER;
+		}
 	}
 
 	i2c_client_node = of_get_child_by_name(of_node, "pcie_i2c_ctrl");
@@ -6230,6 +6236,10 @@ static int msm_pcie_probe(struct platform_device *pdev)
 
 	dev_set_drvdata(&pdev->dev, pcie_dev);
 
+	ret = msm_pcie_i2c_ctrl_init(pcie_dev);
+	if (ret)
+		goto decrease_rc_num;
+
 	ret = msm_pcie_get_resources(pcie_dev, pcie_dev->pdev);
 	if (ret)
 		goto decrease_rc_num;
@@ -6243,6 +6253,7 @@ static int msm_pcie_probe(struct platform_device *pdev)
 		pcie_dev->rc_idx);
 	else
 		pcie_dev->use_pinctrl = true;
+
 
 	if (pcie_dev->use_pinctrl) {
 		pcie_dev->pins_default = pinctrl_lookup_state(pcie_dev->pinctrl,
@@ -6295,8 +6306,6 @@ static int msm_pcie_probe(struct platform_device *pdev)
 				 "PCIe: RC%d: DRV: failed to setup DRV: ret: %d\n",
 				pcie_dev->rc_idx, ret);
 	}
-
-	msm_pcie_i2c_ctrl_init(pcie_dev);
 
 	msm_pcie_sysfs_init(pcie_dev);
 
@@ -7070,12 +7079,12 @@ static int pcie_i2c_ctrl_probe(struct i2c_client *client,
 
 	if (client_id == I2C_CLIENT_ID_NTN3) {
 		i2c_ctrl = &msm_pcie_dev[rc_index].i2c_ctrl;
-		i2c_ctrl->client = client;
 		i2c_ctrl->client_i2c_read = ntn3_i2c_read;
 		i2c_ctrl->client_i2c_write = ntn3_i2c_write;
 		i2c_ctrl->client_i2c_reset = ntn3_ep_reset_ctrl;
 		i2c_ctrl->client_i2c_dump_regs = ntn3_dump_regs;
 		i2c_ctrl->client_i2c_de_emphasis_wa = ntn3_de_emphasis_wa;
+		i2c_ctrl->client = client;
 	} else {
 		dev_err(&client->dev, "invalid client id %d\n", client_id);
 	}
@@ -7392,7 +7401,7 @@ static void msm_pcie_fixup_suspend(struct pci_dev *dev)
 
 	mutex_unlock(&pcie_dev->recovery_lock);
 }
-DECLARE_PCI_FIXUP_SUSPEND(PCIE_VENDOR_ID_QCOM, PCI_ANY_ID,
+DECLARE_PCI_FIXUP_SUSPEND_LATE(PCIE_VENDOR_ID_QCOM, PCI_ANY_ID,
 			  msm_pcie_fixup_suspend);
 
 /* Resume the PCIe link */
@@ -7973,8 +7982,8 @@ int msm_pcie_pm_control(enum msm_pcie_pm_opt pm_opt, u32 busnr, void *user,
 		break;
 	case MSM_PCIE_DISABLE_PC:
 		PCIE_DBG(pcie_dev,
-			 "User of RC%d requests to keep the link always alive.\n",
-			 pcie_dev->rc_idx);
+			 "User of RC%d with vendor_id:0x%x device_id:0x%x requests to keep the link always alive.\n",
+			 pcie_dev->rc_idx, pcidev->vendor, pcidev->device);
 		spin_lock_irqsave(&pcie_dev->cfg_lock, pcie_dev->irqsave_flags);
 		if (pcie_dev->suspending) {
 			PCIE_ERR(pcie_dev,
@@ -7982,17 +7991,20 @@ int msm_pcie_pm_control(enum msm_pcie_pm_opt pm_opt, u32 busnr, void *user,
 				 pcie_dev->rc_idx);
 			ret = MSM_PCIE_ERROR;
 		} else {
-			pcie_dev->disable_pc = true;
+			pcie_dev->disable_pc++;
 		}
 		spin_unlock_irqrestore(&pcie_dev->cfg_lock,
 				       pcie_dev->irqsave_flags);
 		break;
 	case MSM_PCIE_ENABLE_PC:
 		PCIE_DBG(pcie_dev,
-			 "User of RC%d cancels the request of alive link.\n",
-			 pcie_dev->rc_idx);
+			 "User of RC%d with vendor_id:0x%x device_id:0x%x cancels the request of alive link.\n",
+			 pcie_dev->rc_idx, pcidev->vendor, pcidev->device);
 		spin_lock_irqsave(&pcie_dev->cfg_lock, pcie_dev->irqsave_flags);
-		pcie_dev->disable_pc = false;
+		if (pcie_dev->disable_pc > 0)
+			pcie_dev->disable_pc--;
+		else
+			PCIE_ERR(pcie_dev, "PCIe:RC%d cannot call ENABLE_PC", pcie_dev->rc_idx);
 		spin_unlock_irqrestore(&pcie_dev->cfg_lock,
 				       pcie_dev->irqsave_flags);
 		break;
