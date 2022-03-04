@@ -161,6 +161,22 @@ struct wmi_twt_disable_complete_event {
 	uint32_t pdev_id;
 };
 
+/**
+ * wmi_twt_ack_complete_event_param:
+ * @vdev_id: vdev id
+ * @peer_macaddr: peer mac address
+ * @dialog_id: dialog id
+ * @twt_cmd_ack: ack event to the corresponding twt command
+ * @status: twt command status
+ */
+struct wmi_twt_ack_complete_event_param {
+	uint32_t vdev_id;
+	struct qdf_mac_addr peer_macaddr;
+	uint32_t dialog_id;
+	uint32_t twt_cmd_ack;
+	uint32_t status;
+};
+
 /* TWT event types
  *  refer to wmi_unified.h enum wmi_twt_session_stats_type
  */
@@ -290,6 +306,19 @@ struct wmi_twt_add_dialog_param {
 		b_twt_recommendation:3;
 };
 
+/* enum - status code of Get stats TWT dialog
+ * @WMI_HOST_GET_STATS_TWT_STATUS_OK: Get status TWT dialog successfully completed
+ * @WMI_HOST_GET_STATS_TWT_STATUS_DIALOG_ID_NOT_EXIST: TWT dialog ID does not exist
+ * @WMI_HOST_GET_STATS_TWT_STATUS_INVALID_PARAM: Invalid parameters
+ * @WMI_HOST_GET_STATS_TWT_STATUS_UNKNOWN_ERROR: Unknown error
+ */
+enum WMI_HOST_GET_STATS_TWT_STATUS {
+	WMI_HOST_GET_STATS_TWT_STATUS_OK,
+	WMI_HOST_GET_STATS_TWT_STATUS_DIALOG_ID_NOT_EXIST,
+	WMI_HOST_GET_STATS_TWT_STATUS_INVALID_PARAM,
+	WMI_HOST_GET_STATS_TWT_STATUS_UNKNOWN_ERROR,
+};
+
 /* enum - status code of adding TWT dialog
  * @WMI_HOST_ADD_TWT_STATUS_OK: adding TWT dialog successfully completed
  * @WMI_HOST_ADD_TWT_STATUS_TWT_NOT_ENABLED: TWT not enabled
@@ -309,6 +338,7 @@ struct wmi_twt_add_dialog_param {
  * Failed
  * @WMI_HOST_ADD_TWT_STATUS_ROAM_IN_PROGRESS: Roaming in progress
  * @WMI_HOST_ADD_TWT_STATUS_CHAN_SW_IN_PROGRESS: Channel switch in progress
+ * @WMI_HOST_ADD_TWT_STATUS_SCAN_IN_PROGRESS: Scan is in progress
  */
 enum WMI_HOST_ADD_TWT_STATUS {
 	WMI_HOST_ADD_TWT_STATUS_OK,
@@ -325,6 +355,7 @@ enum WMI_HOST_ADD_TWT_STATUS {
 	WMI_HOST_ADD_TWT_STATUS_AP_IE_VALIDATION_FAILED,
 	WMI_HOST_ADD_TWT_STATUS_ROAM_IN_PROGRESS,
 	WMI_HOST_ADD_TWT_STATUS_CHAN_SW_IN_PROGRESS,
+	WMI_HOST_ADD_TWT_STATUS_SCAN_IN_PROGRESS,
 };
 
 /**
@@ -380,6 +411,15 @@ struct wmi_twt_add_dialog_complete_event_param {
 };
 
 /**
+ * struct wmi_twt_cap_bitmap_params -
+ * twt_cap_bitmap: TWT capability bitmap
+ *
+ */
+struct wmi_twt_cap_bitmap_params {
+	uint32_t twt_ack_support_cap:1;
+};
+
+/**
  * struct wmi_twt_del_dialog_param -
  * @vdev_id: VDEV identifier
  * @peer_macaddr: Peer mac address
@@ -412,6 +452,8 @@ struct wmi_twt_del_dialog_param {
  * @WMI_HOST_DEL_TWT_STATUS_CONCURRENCY: TWT session teardown due to
  * concurrent session comming up.
  * @WMI_HOST_DEL_TWT_STATUS_CHAN_SW_IN_PROGRESS: Channel switch in progress
+ * @WMI_HOST_DEL_TWT_STATUS_SCAN_IN_PROGRESS: Scan is in progress
+ * @WMI_HOST_DEL_TWT_STATUS_PS_DISABLE_TEARDOWN: PS disable TWT teardown
  */
 enum WMI_HOST_DEL_TWT_STATUS {
 	WMI_HOST_DEL_TWT_STATUS_OK,
@@ -425,6 +467,8 @@ enum WMI_HOST_DEL_TWT_STATUS {
 	WMI_HOST_DEL_TWT_STATUS_ROAMING,
 	WMI_HOST_DEL_TWT_STATUS_CONCURRENCY,
 	WMI_HOST_DEL_TWT_STATUS_CHAN_SW_IN_PROGRESS,
+	WMI_HOST_DEL_TWT_STATUS_SCAN_IN_PROGRESS,
+	WMI_HOST_DEL_TWT_STATUS_PS_DISABLE_TEARDOWN,
 };
 
 /**
@@ -486,6 +530,8 @@ struct wmi_twt_nudge_dialog_cmd_param {
  * unknown reason
  * @WMI_HOST_PAUSE_TWT_STATUS_ALREADY_PAUSED: TWT dialog already in paused state
  * @WMI_HOST_PAUSE_TWT_STATUS_CHAN_SW_IN_PROGRESS: Channel switch in progress
+ * @WMI_HOST_PAUSE_TWT_STATUS_ROAM_IN_PROGRESS: Roaming is in progress
+ * @WMI_HOST_PAUSE_TWT_STATUS_SCAN_IN_PROGRESS: Scan is in progress
  */
 enum WMI_HOST_PAUSE_TWT_STATUS {
 	WMI_HOST_PAUSE_TWT_STATUS_OK,
@@ -497,6 +543,8 @@ enum WMI_HOST_PAUSE_TWT_STATUS {
 	WMI_HOST_PAUSE_TWT_STATUS_UNKNOWN_ERROR,
 	WMI_HOST_PAUSE_TWT_STATUS_ALREADY_PAUSED,
 	WMI_HOST_PAUSE_TWT_STATUS_CHAN_SW_IN_PROGRESS,
+	WMI_HOST_PAUSE_TWT_STATUS_ROAM_IN_PROGRESS,
+	WMI_HOST_PAUSE_TWT_STATUS_SCAN_IN_PROGRESS,
 };
 
 /**
@@ -525,6 +573,8 @@ struct wmi_twt_pause_dialog_complete_event_param {
  * @WMI_HOST_NUDGE_TWT_STATUS_UNKNOWN_ERROR: nudge TWT dialog failed with an
  * unknown reason
  * @WMI_HOST_NUDGE_TWT_STATUS_CHAN_SW_IN_PROGRESS: Channel switch in progress
+ * @WMI_HOST_NUDGE_TWT_STATUS_ROAM_IN_PROGRESS: Roaming in progress
+ * @WMI_HOST_NUDGE_TWT_STATUS_SCAN_IN_PROGRESS: Scan is in progress
  */
 enum WMI_HOST_NUDGE_TWT_STATUS {
 	WMI_HOST_NUDGE_TWT_STATUS_OK,
@@ -535,6 +585,8 @@ enum WMI_HOST_NUDGE_TWT_STATUS {
 	WMI_HOST_NUDGE_TWT_STATUS_NO_ACK,
 	WMI_HOST_NUDGE_TWT_STATUS_UNKNOWN_ERROR,
 	WMI_HOST_NUDGE_TWT_STATUS_CHAN_SW_IN_PROGRESS,
+	WMI_HOST_NUDGE_TWT_STATUS_ROAM_IN_PROGRESS,
+	WMI_HOST_NUDGE_TWT_STATUS_SCAN_IN_PROGRESS,
 };
 
 /**
@@ -585,6 +637,8 @@ struct wmi_twt_resume_dialog_cmd_param {
  * @WMI_HOST_RESUME_TWT_STATUS_UNKNOWN_ERROR: resuming TWT dialog failed with an
  * unknown reason
  * @WMI_HOST_RESUME_TWT_STATUS_CHAN_SW_IN_PROGRESS: Channel switch in progress
+ * @WMI_HOST_RESUME_TWT_STATUS_ROAM_IN_PROGRESS: Roaming in progress
+ * @WMI_HOST_RESUME_TWT_STATUS_SCAN_IN_PROGRESS: Scan is in progress
  */
 enum WMI_HOST_RESUME_TWT_STATUS {
 	WMI_HOST_RESUME_TWT_STATUS_OK,
@@ -596,6 +650,8 @@ enum WMI_HOST_RESUME_TWT_STATUS {
 	WMI_HOST_RESUME_TWT_STATUS_NO_ACK,
 	WMI_HOST_RESUME_TWT_STATUS_UNKNOWN_ERROR,
 	WMI_HOST_RESUME_TWT_STATUS_CHAN_SW_IN_PROGRESS,
+	WMI_HOST_RESUME_TWT_STATUS_ROAM_IN_PROGRESS,
+	WMI_HOST_RESUME_TWT_STATUS_SCAN_IN_PROGRESS,
 };
 
 /**
@@ -724,4 +780,21 @@ struct wmi_twt_btwt_remove_sta_complete_event_param {
 };
 #endif
 
+/**
+ * enum WMI_HOST_TWT_CMD_FOR_ACK_EVENT - Ack event for different TWT command
+ * WMI_HOST_TWT_ADD_DIALOG_CMDID: Ack event for add dialog command
+ * WMI_HOST_TWT_DEL_DIALOG_CMDID: Ack event for delete dialog command
+ * WMI_HOST_TWT_PAUSE_DIALOG_CMDID: Ack event for pause command
+ * WMI_HOST_TWT_RESUME_DIALOG_CMDID: Ack event for resume command
+ * WMI_HOST_TWT_NUDGE_DIALOG_CMDID: Ack event for nudge command
+ * WMI_HOST_TWT_UNKNOWN_CMDID: Ack event for unknown TWT command
+ */
+enum WMI_HOST_TWT_CMD_FOR_ACK_EVENT {
+	WMI_HOST_TWT_ADD_DIALOG_CMDID = 0,
+	WMI_HOST_TWT_DEL_DIALOG_CMDID,
+	WMI_HOST_TWT_PAUSE_DIALOG_CMDID,
+	WMI_HOST_TWT_RESUME_DIALOG_CMDID,
+	WMI_HOST_TWT_NUDGE_DIALOG_CMDID,
+	WMI_HOST_TWT_UNKNOWN_CMDID,
+};
 #endif /* _WMI_UNIFIED_TWT_PARAM_H_ */

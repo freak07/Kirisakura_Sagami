@@ -499,6 +499,8 @@ wmi_get_converted_twt_add_dialog_status(WMI_ADD_TWT_STATUS_T tgt_status)
 		return WMI_HOST_ADD_TWT_STATUS_ROAM_IN_PROGRESS;
 	case WMI_ADD_TWT_STATUS_CHAN_SW_IN_PROGRESS:
 		return WMI_HOST_ADD_TWT_STATUS_CHAN_SW_IN_PROGRESS;
+	case WMI_ADD_TWT_STATUS_SCAN_IN_PROGRESS:
+		return WMI_HOST_ADD_TWT_STATUS_SCAN_IN_PROGRESS;
 	default:
 		return WMI_HOST_ADD_TWT_STATUS_UNKNOWN_ERROR;
 	}
@@ -638,6 +640,8 @@ wmi_get_converted_twt_del_dialog_status(WMI_DEL_TWT_STATUS_T tgt_status)
 		return WMI_HOST_DEL_TWT_STATUS_CONCURRENCY;
 	case WMI_DEL_TWT_STATUS_CHAN_SW_IN_PROGRESS:
 		return WMI_HOST_DEL_TWT_STATUS_CHAN_SW_IN_PROGRESS;
+	case WMI_DEL_TWT_STATUS_SCAN_IN_PROGRESS:
+		return WMI_HOST_DEL_TWT_STATUS_SCAN_IN_PROGRESS;
 	default:
 		return WMI_HOST_DEL_TWT_STATUS_UNKNOWN_ERROR;
 	}
@@ -691,6 +695,10 @@ wmi_twt_pause_status_to_host_twt_status(WMI_PAUSE_TWT_STATUS_T status)
 		return WMI_HOST_PAUSE_TWT_STATUS_ALREADY_PAUSED;
 	case WMI_PAUSE_TWT_STATUS_CHAN_SW_IN_PROGRESS:
 		return WMI_HOST_PAUSE_TWT_STATUS_CHAN_SW_IN_PROGRESS;
+	case WMI_PAUSE_TWT_STATUS_ROAM_IN_PROGRESS:
+		return WMI_HOST_PAUSE_TWT_STATUS_ROAM_IN_PROGRESS;
+	case WMI_PAUSE_TWT_STATUS_SCAN_IN_PROGRESS:
+		return WMI_HOST_PAUSE_TWT_STATUS_SCAN_IN_PROGRESS;
 	default:
 		return WMI_HOST_PAUSE_TWT_STATUS_UNKNOWN_ERROR;
 	}
@@ -740,6 +748,10 @@ wmi_twt_nudge_status_to_host_twt_status(WMI_TWT_NUDGE_STATUS_T status)
 		return WMI_HOST_NUDGE_TWT_STATUS_UNKNOWN_ERROR;
 	case WMI_NUDGE_TWT_STATUS_CHAN_SW_IN_PROGRESS:
 		return WMI_HOST_NUDGE_TWT_STATUS_CHAN_SW_IN_PROGRESS;
+	case WMI_NUDGE_TWT_STATUS_ROAM_IN_PROGRESS:
+		return WMI_HOST_NUDGE_TWT_STATUS_ROAM_IN_PROGRESS;
+	case WMI_NUDGE_TWT_STATUS_SCAN_IN_PROGRESS:
+		return WMI_HOST_NUDGE_TWT_STATUS_SCAN_IN_PROGRESS;
 	default:
 		return WMI_HOST_NUDGE_TWT_STATUS_UNKNOWN_ERROR;
 	}
@@ -795,6 +807,10 @@ wmi_get_converted_twt_resume_dialog_status(WMI_RESUME_TWT_STATUS_T tgt_status)
 		return WMI_HOST_RESUME_TWT_STATUS_NO_ACK;
 	case WMI_RESUME_TWT_STATUS_CHAN_SW_IN_PROGRESS:
 		return WMI_HOST_RESUME_TWT_STATUS_CHAN_SW_IN_PROGRESS;
+	case WMI_RESUME_TWT_STATUS_ROAM_IN_PROGRESS:
+		return WMI_HOST_RESUME_TWT_STATUS_ROAM_IN_PROGRESS;
+	case WMI_RESUME_TWT_STATUS_SCAN_IN_PROGRESS:
+		return WMI_HOST_RESUME_TWT_STATUS_SCAN_IN_PROGRESS;
 	default:
 		return WMI_HOST_RESUME_TWT_STATUS_UNKNOWN_ERROR;
 	}
@@ -1012,6 +1028,96 @@ extract_twt_session_stats_event_data(wmi_unified_t wmi_handle,
 	return QDF_STATUS_SUCCESS;
 }
 
+static QDF_STATUS extract_twt_cap_service_ready_ext2_tlv(
+				wmi_unified_t wmi_handle, uint8_t *event,
+				struct wmi_twt_cap_bitmap_params *var)
+{
+	WMI_SERVICE_READY_EXT2_EVENTID_param_tlvs *param_buf;
+	wmi_twt_caps_params *twt_caps;
+
+	param_buf = (WMI_SERVICE_READY_EXT2_EVENTID_param_tlvs *)event;
+	if (!param_buf)
+		return QDF_STATUS_E_INVAL;
+
+	twt_caps = param_buf->twt_caps;
+	if (!twt_caps)
+		return QDF_STATUS_E_INVAL;
+
+	var->twt_ack_support_cap = WMI_GET_BITS(twt_caps->twt_capability_bitmap,
+						0, 1);
+
+	return QDF_STATUS_SUCCESS;
+}
+
+static enum WMI_HOST_TWT_CMD_FOR_ACK_EVENT
+wmi_get_converted_twt_command_for_ack_event(WMI_CMD_ID tgt_cmd)
+{
+	switch (tgt_cmd) {
+	case WMI_TWT_ADD_DIALOG_CMDID:
+		return WMI_HOST_TWT_ADD_DIALOG_CMDID;
+	case WMI_TWT_DEL_DIALOG_CMDID:
+		return WMI_HOST_TWT_DEL_DIALOG_CMDID;
+	case WMI_TWT_PAUSE_DIALOG_CMDID:
+		return WMI_HOST_TWT_PAUSE_DIALOG_CMDID;
+	case WMI_TWT_RESUME_DIALOG_CMDID:
+		return WMI_HOST_TWT_RESUME_DIALOG_CMDID;
+	case WMI_TWT_NUDGE_DIALOG_CMDID:
+		return WMI_HOST_TWT_NUDGE_DIALOG_CMDID;
+	default:
+		return WMI_HOST_TWT_UNKNOWN_CMDID;
+	}
+}
+
+static QDF_STATUS
+extract_twt_ack_comp_event_tlv(wmi_unified_t wmi_handle,
+			       uint8_t *evt_buf,
+			       struct wmi_twt_ack_complete_event_param *var)
+{
+	WMI_TWT_ACK_EVENTID_param_tlvs *param_buf;
+	wmi_twt_ack_event_fixed_param *ack_event;
+
+	param_buf = (WMI_TWT_ACK_EVENTID_param_tlvs *)evt_buf;
+	if (!param_buf) {
+		wmi_err("evt_buf is NULL");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	ack_event = param_buf->fixed_param;
+
+	var->vdev_id = ack_event->vdev_id;
+	WMI_MAC_ADDR_TO_CHAR_ARRAY(&ack_event->peer_macaddr,
+				   var->peer_macaddr.bytes);
+	var->dialog_id = ack_event->dialog_id;
+	var->twt_cmd_ack = wmi_get_converted_twt_command_for_ack_event(
+						ack_event->twt_cmd);
+
+	switch (ack_event->twt_cmd) {
+	case WMI_TWT_ADD_DIALOG_CMDID:
+		var->status = wmi_get_converted_twt_add_dialog_status(
+						ack_event->status);
+		break;
+	case WMI_TWT_DEL_DIALOG_CMDID:
+		var->status = wmi_get_converted_twt_del_dialog_status(
+						ack_event->status);
+		break;
+	case WMI_TWT_PAUSE_DIALOG_CMDID:
+		var->status = wmi_twt_pause_status_to_host_twt_status(
+						ack_event->status);
+		break;
+	case WMI_TWT_RESUME_DIALOG_CMDID:
+		var->status = wmi_get_converted_twt_resume_dialog_status(
+						ack_event->status);
+		break;
+	case WMI_TWT_NUDGE_DIALOG_CMDID:
+		var->status = wmi_twt_nudge_status_to_host_twt_status(
+						ack_event->status);
+		break;
+	default:
+		break;
+	}
+	return QDF_STATUS_SUCCESS;
+}
+
 void wmi_twt_attach_tlv(wmi_unified_t wmi_handle)
 {
 	struct wmi_ops *ops = wmi_handle->ops;
@@ -1044,5 +1150,8 @@ void wmi_twt_attach_tlv(wmi_unified_t wmi_handle)
 				extract_twt_session_stats_event_data;
 	ops->extract_twt_notify_event =
 				extract_twt_notify_event_tlv;
+	ops->extract_twt_cap_service_ready_ext2 =
+				extract_twt_cap_service_ready_ext2_tlv,
+	ops->extract_twt_ack_comp_event = extract_twt_ack_comp_event_tlv;
 	wmi_twt_attach_bcast_twt_tlv(ops);
 }

@@ -84,6 +84,17 @@ QDF_STATUS wlan_reg_get_max_5g_bw_from_regdomain(uint16_t regdmn,
 	return reg_get_max_5g_bw_from_regdomain(regdmn, max_bw_5g);
 }
 
+#ifdef CONFIG_REG_CLIENT
+QDF_STATUS
+wlan_reg_get_6g_power_type_for_ctry(uint8_t *ap_ctry, uint8_t *sta_ctry,
+				    enum reg_6g_ap_type *pwr_type_6g,
+				    bool *ctry_code_match)
+{
+	return reg_get_6g_power_type_for_ctry(ap_ctry, sta_ctry, pwr_type_6g,
+					      ctry_code_match);
+}
+#endif
+
 #ifdef CONFIG_CHAN_NUM_API
 /**
  * wlan_reg_get_channel_state() - Get channel state from regulatory
@@ -203,6 +214,15 @@ QDF_STATUS wlan_reg_get_current_chan_list(struct wlan_objmgr_pdev *pdev,
 }
 
 qdf_export_symbol(wlan_reg_get_current_chan_list);
+
+#ifdef CONFIG_REG_CLIENT
+QDF_STATUS wlan_reg_get_secondary_current_chan_list(
+					struct wlan_objmgr_pdev *pdev,
+					struct regulatory_channel *chan_list)
+{
+	return reg_get_secondary_current_chan_list(pdev, chan_list);
+}
+#endif
 
 /**
  * wlan_reg_get_bw_value() - give bandwidth value
@@ -628,6 +648,11 @@ bool wlan_reg_is_us(uint8_t *country)
 	return reg_is_us_alpha2(country);
 }
 
+bool wlan_reg_is_etsi(uint8_t *country)
+{
+	return reg_is_etsi_alpha2(country);
+}
+
 void wlan_reg_register_chan_change_callback(struct wlan_objmgr_psoc *psoc,
 					    void *cbk, void *arg)
 {
@@ -835,6 +860,14 @@ bool wlan_reg_is_freq_indoor(struct wlan_objmgr_pdev *pdev, qdf_freq_t freq)
 	return reg_is_freq_indoor(pdev, freq);
 }
 
+#ifdef CONFIG_REG_CLIENT
+bool wlan_reg_is_freq_indoor_in_secondary_list(struct wlan_objmgr_pdev *pdev,
+					       qdf_freq_t freq)
+{
+	return reg_is_freq_indoor_in_secondary_list(pdev, freq);
+}
+#endif
+
 #ifdef CONFIG_BAND_6GHZ
 bool wlan_reg_is_6ghz_chan_freq(uint16_t freq)
 {
@@ -901,6 +934,23 @@ wlan_reg_get_band_channel_list(struct wlan_objmgr_pdev *pdev,
 	return reg_get_band_channel_list(pdev, band_mask, channel_list);
 }
 
+#ifdef CONFIG_REG_CLIENT
+uint16_t
+wlan_reg_get_secondary_band_channel_list(struct wlan_objmgr_pdev *pdev,
+					 uint8_t band_mask,
+					 struct regulatory_channel
+					 *channel_list)
+{
+	if (!pdev) {
+		reg_err("pdev object is NULL");
+		return 0;
+	}
+
+	return reg_get_secondary_band_channel_list(pdev, band_mask,
+						   channel_list);
+}
+#endif
+
 qdf_freq_t wlan_reg_chan_band_to_freq(struct wlan_objmgr_pdev *pdev,
 				      uint8_t chan, uint8_t band_mask)
 {
@@ -909,10 +959,12 @@ qdf_freq_t wlan_reg_chan_band_to_freq(struct wlan_objmgr_pdev *pdev,
 
 qdf_export_symbol(wlan_reg_chan_band_to_freq);
 
+#ifdef CONFIG_49GHZ_CHAN
 bool wlan_reg_is_49ghz_freq(qdf_freq_t freq)
 {
 	return reg_is_49ghz_freq(freq);
 }
+#endif /* CONFIG_49GHZ_CHAN */
 
 uint8_t wlan_reg_ch_num(uint32_t ch_enum)
 {
@@ -1052,6 +1104,21 @@ bool wlan_reg_is_disable_for_freq(struct wlan_objmgr_pdev *pdev,
 	return reg_is_disable_for_freq(pdev, freq);
 }
 
+#ifdef CONFIG_REG_CLIENT
+bool wlan_reg_is_disable_in_secondary_list_for_freq(
+						struct wlan_objmgr_pdev *pdev,
+						qdf_freq_t freq)
+{
+	return reg_is_disable_in_secondary_list_for_freq(pdev, freq);
+}
+
+bool wlan_reg_is_dfs_in_secondary_list_for_freq(struct wlan_objmgr_pdev *pdev,
+						qdf_freq_t freq)
+{
+	return reg_is_dfs_in_secondary_list_for_freq(pdev, freq);
+}
+#endif
+
 bool wlan_reg_is_passive_for_freq(struct wlan_objmgr_pdev *pdev,
 				  qdf_freq_t freq)
 {
@@ -1113,6 +1180,15 @@ wlan_reg_get_channel_state_for_freq(struct wlan_objmgr_pdev *pdev,
 {
 	return reg_get_channel_state_for_freq(pdev, freq);
 }
+
+#ifdef CONFIG_REG_CLIENT
+enum channel_state wlan_reg_get_channel_state_from_secondary_list_for_freq(
+						struct wlan_objmgr_pdev *pdev,
+						qdf_freq_t freq)
+{
+	return reg_get_channel_state_from_secondary_list_for_freq(pdev, freq);
+}
+#endif
 
 uint8_t wlan_reg_get_channel_reg_power_for_freq(struct wlan_objmgr_pdev *pdev,
 						qdf_freq_t freq)
@@ -1373,6 +1449,13 @@ enum reg_6g_ap_type
 wlan_reg_decide_6g_ap_pwr_type(struct wlan_objmgr_pdev *pdev)
 {
 	return reg_decide_6g_ap_pwr_type(pdev);
+}
+
+QDF_STATUS
+wlan_reg_set_ap_pwr_and_update_chan_list(struct wlan_objmgr_pdev *pdev,
+					 enum reg_6g_ap_type ap_pwr_type)
+{
+	return reg_set_ap_pwr_and_update_chan_list(pdev, ap_pwr_type);
 }
 #endif /* CONFIG_BAND_6GHZ */
 

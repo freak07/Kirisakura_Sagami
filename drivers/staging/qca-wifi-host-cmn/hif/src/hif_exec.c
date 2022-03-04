@@ -96,7 +96,7 @@ hif_hist_skip_event_record(struct hif_event_history *hist_ev,
 					    HIF_EVENT_HIST_MAX)) {
 			last_irq_rec =
 				&hist_ev->event[hist_ev->misc.last_irq_index];
-			last_irq_rec->timestamp = qdf_get_log_timestamp();
+			last_irq_rec->timestamp = hif_get_log_timestamp();
 			last_irq_rec->cpu_id = qdf_get_cpu();
 			last_irq_rec->hp++;
 			last_irq_rec->tp = last_irq_rec->timestamp -
@@ -106,7 +106,7 @@ hif_hist_skip_event_record(struct hif_event_history *hist_ev,
 		break;
 	case HIF_EVENT_BH_SCHED:
 		if (rec->type == HIF_EVENT_BH_SCHED) {
-			rec->timestamp = qdf_get_log_timestamp();
+			rec->timestamp = hif_get_log_timestamp();
 			rec->cpu_id = qdf_get_cpu();
 			return true;
 		}
@@ -117,6 +117,11 @@ hif_hist_skip_event_record(struct hif_event_history *hist_ev,
 		break;
 	case HIF_EVENT_SRNG_ACCESS_END:
 		if (rec->type != HIF_EVENT_SRNG_ACCESS_START)
+			return true;
+		break;
+	case HIF_EVENT_BH_COMPLETE:
+	case HIF_EVENT_BH_FORCE_BREAK:
+		if (rec->type != HIF_EVENT_SRNG_ACCESS_END)
 			return true;
 		break;
 	default:
@@ -623,6 +628,8 @@ static int hif_exec_poll(struct napi_struct *napi, int budget)
 	actual_dones = work_done;
 
 	if (!hif_ext_group->force_break && work_done < normalized_budget) {
+		hif_record_event(hif_ext_group->hif, hif_ext_group->grp_id,
+				 0, 0, 0, HIF_EVENT_BH_COMPLETE);
 		napi_complete(napi);
 		qdf_atomic_dec(&scn->active_grp_tasklet_cnt);
 		hif_ext_group->irq_enable(hif_ext_group);
@@ -630,6 +637,8 @@ static int hif_exec_poll(struct napi_struct *napi, int budget)
 	} else {
 		/* if the ext_group supports time based yield, claim full work
 		 * done anyways */
+		hif_record_event(hif_ext_group->hif, hif_ext_group->grp_id,
+				 0, 0, 0, HIF_EVENT_BH_FORCE_BREAK);
 		work_done = normalized_budget;
 	}
 
@@ -834,6 +843,21 @@ QDF_STATUS hif_configure_ext_group_interrupts(struct hif_opaque_softc *hif_ctx)
 }
 
 qdf_export_symbol(hif_configure_ext_group_interrupts);
+
+void hif_deconfigure_ext_group_interrupts(struct hif_opaque_softc *hif_ctx)
+{
+	struct hif_softc *scn = HIF_GET_SOFTC(hif_ctx);
+
+	if (!scn || !scn->ext_grp_irq_configured) {
+		hif_err("scn(%pk) is NULL or grp irq not configured", scn);
+		return;
+	}
+
+	hif_grp_irq_deconfigure(scn);
+	scn->ext_grp_irq_configured = false;
+}
+
+qdf_export_symbol(hif_deconfigure_ext_group_interrupts);
 
 #ifdef WLAN_SUSPEND_RESUME_TEST
 /**

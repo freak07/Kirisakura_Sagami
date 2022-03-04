@@ -181,6 +181,32 @@ enum scan_mode_6ghz {
 
 /*
  * <ini>
+ * min_channel_time_6g - Set min dwell time for 6G channels scan
+ * @Min: 5
+ * @Max: 60
+ * @Default: 25
+ *
+ * This ini is used to set minimum time in msecs spent in 6G channels scan.
+ * Firmware will park on the 6G channel for this duration and if no FILS
+ * discovery, Beacon, Probe resp is received it will move to new channel after
+ * this duration. If found , it will wait for "active_max_channel_time_6g"
+ * duration
+ *
+ * Related: active_max_channel_time_6g
+ *
+ * Supported Feature: Scan
+ *
+ * Usage: External
+ *
+ * </ini>
+ */
+ #define CFG_MIN_6G_CHANNEL_TIME CFG_INI_UINT(\
+		"min_dwell_time_6g",\
+		5, 60, 25,\
+		CFG_VALUE_OR_DEFAULT, "min dwell time for 6G channels")
+
+/*
+ * <ini>
  * active_max_channel_time_6g - Set max time for active 6G channel scan
  * @Min: 0
  * @Max: 10000
@@ -191,6 +217,8 @@ enum scan_mode_6ghz {
  *
  * Related: None
  *
+ * Supported Feature: Scan
+ *
  * Usage: External
  *
  * </ini>
@@ -198,7 +226,7 @@ enum scan_mode_6ghz {
 #define CFG_ACTIVE_MAX_6G_CHANNEL_TIME CFG_INI_UINT(\
 		"active_max_channel_time_6g",\
 		0, 10000, 40,\
-		CFG_VALUE_OR_DEFAULT, "active dwell time for 6G channels")
+		CFG_VALUE_OR_DEFAULT, "max active dwell time for 6G channels")
 
 /*
  * <ini>
@@ -209,8 +237,9 @@ enum scan_mode_6ghz {
  *
  * This ini is used to set maximum time in msecs spent in passive 6G chan scan
  *
- *
  * Related: None
+ *
+ * Supported Feature: Scan
  *
  * Usage: External
  *
@@ -219,7 +248,56 @@ enum scan_mode_6ghz {
 #define CFG_PASSIVE_MAX_6G_CHANNEL_TIME CFG_INI_UINT(\
 		"passive_max_channel_time_6g",\
 		0, 10000, 30,\
-		CFG_VALUE_OR_DEFAULT, "passive dwell time for 6G channels")
+		CFG_VALUE_OR_DEFAULT, "max passive dwell time for 6G channels")
+
+/*
+ * <ini>
+ * active_max_channel_time_6g_conc - Set max time for active 6G
+ * channel scan when associated to AP.
+ * @Min: 0
+ * @Max: 10000
+ * @Default: 40
+ *
+ * This ini is used to set maximum time in msecs spent in
+ * active 6G channel scan
+ *
+ * Related: None
+ *
+ * Supported Feature: Scan
+ *
+ * Usage: External
+ *
+ * </ini>
+ */
+#define CFG_ACTIVE_MAX_6G_CHANNEL_TIME_CONC CFG_INI_UINT(\
+		"active_max_channel_time_6g_conc",\
+		0, 10000, 40,\
+		CFG_VALUE_OR_DEFAULT, "active conc dwell time for 6G channels")
+
+/*
+ * <ini>
+ * passive_max_channel_time_6g_conc - Set max time for passive 6G
+ * channel scan when associated to AP.
+ * @Min: 0
+ * @Max: 10000
+ * @Default: 40
+ *
+ * This ini is used to set maximum time in msecs spent in
+ * passive 6G chan scan
+ *
+ * Related: None
+ *
+ * Supported Feature: Scan
+ *
+ * Usage: External
+ *
+ * </ini>
+ */
+#define CFG_PASSIVE_MAX_6G_CHANNEL_TIME_CONC CFG_INI_UINT(\
+		"passive_max_channel_time_6g_conc",\
+		0, 10000, 40,\
+		CFG_VALUE_OR_DEFAULT,\
+		"passive conc dwell time for 6G channels")
 
 /*
  * <ini>
@@ -724,7 +802,7 @@ enum scan_mode_6ghz {
  * mawc_nlo_enabled - For NLO/PNO, enable MAWC based scan
  * @Min: 0
  * @Max: 1
- * @Default: 1
+ * @Default: 0
  *
  * Enable/Disable the Motion Aided Wireless Connectivity
  * based NLO using this parameter
@@ -737,7 +815,7 @@ enum scan_mode_6ghz {
  */
 #define CFG_MAWC_NLO_ENABLED CFG_INI_BOOL( \
 			"mawc_nlo_enabled", \
-			1, \
+			0, \
 			"Enable MAWC based scan")
 
 /*
@@ -1344,8 +1422,11 @@ enum scan_mode_6ghz {
 	CFG(CFG_INITIAL_NO_DFS_SCAN) \
 	CFG(CFG_ACTIVE_MAX_2G_CHANNEL_TIME) \
 	CFG(CFG_PASSIVE_MAX_CHANNEL_TIME) \
+	CFG(CFG_MIN_6G_CHANNEL_TIME) \
 	CFG(CFG_ACTIVE_MAX_6G_CHANNEL_TIME) \
 	CFG(CFG_PASSIVE_MAX_6G_CHANNEL_TIME) \
+	CFG(CFG_ACTIVE_MAX_6G_CHANNEL_TIME_CONC) \
+	CFG(CFG_PASSIVE_MAX_6G_CHANNEL_TIME_CONC) \
 	CFG(CFG_SCAN_NUM_PROBES) \
 	CFG(CFG_SCAN_PROBE_REPEAT_TIME) \
 	CFG(CFG_ADAPTIVE_SCAN_DWELL_MODE) \

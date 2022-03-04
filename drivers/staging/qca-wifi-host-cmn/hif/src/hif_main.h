@@ -290,6 +290,10 @@ struct hif_softc {
 #ifdef SYSTEM_PM_CHECK
 	qdf_atomic_t sys_pm_state;
 #endif
+#if defined(HIF_IPCI) && defined(FEATURE_HAL_DELAYED_REG_WRITE)
+	qdf_atomic_t dp_ep_vote_access;
+	qdf_atomic_t ep_vote_access;
+#endif
 };
 
 static inline
@@ -301,6 +305,18 @@ void *hif_get_hal_handle(struct hif_opaque_softc *hif_hdl)
 		return NULL;
 
 	return sc->hal_soc;
+}
+
+/**
+ * hif_get_num_active_tasklets() - get the number of active
+ *		tasklets pending to be completed.
+ * @scn: HIF context
+ *
+ * Returns: the number of tasklets which are active
+ */
+static inline int hif_get_num_active_tasklets(struct hif_softc *scn)
+{
+	return qdf_atomic_read(&scn->active_tasklet_cnt);
 }
 
 /**

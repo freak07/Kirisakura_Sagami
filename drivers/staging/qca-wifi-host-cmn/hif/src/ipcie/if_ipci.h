@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2020-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -57,14 +58,24 @@ struct hif_ipci_stats {
 /* Register used for handshake mechanism to validate UMAC is awake */
 #define PCIE_PCIE_LOCAL_REG_PCIE_SOC_WAKE_PCIE_LOCAL_REG (0x01E00000 + 0x3004)
 /* Timeout duration to validate UMAC wake status */
-#ifdef HAL_CONFIG_SLUB_DEBUG_ON
 #define FORCE_WAKE_DELAY_TIMEOUT_MS 500
-#else
-#define FORCE_WAKE_DELAY_TIMEOUT_MS 50
-#endif /* HAL_CONFIG_SLUB_DEBUG_ON */
+
 /* Validate UMAC status every 5ms */
 #define FORCE_WAKE_DELAY_MS 5
 #endif /* FORCE_WAKE */
+
+#ifdef FEATURE_HAL_DELAYED_REG_WRITE
+#define EP_VOTE_POLL_TIME_US  50
+#define EP_VOTE_POLL_TIME_CNT 2
+#ifdef HAL_CONFIG_SLUB_DEBUG_ON
+#define EP_WAKE_RESET_DELAY_TIMEOUT_MS 3
+#else
+#define EP_WAKE_RESET_DELAY_TIMEOUT_MS 10
+#endif
+#define EP_WAKE_DELAY_TIMEOUT_MS 10
+#define EP_WAKE_RESET_DELAY_US 50
+#define EP_WAKE_DELAY_US 200
+#endif
 
 struct hif_ipci_softc {
 	struct HIF_CE_state ce_sc;
@@ -77,14 +88,25 @@ struct hif_ipci_softc {
 	uint32_t register_window;
 	qdf_spinlock_t register_access_lock;
 	qdf_spinlock_t irq_lock;
+	bool grp_irqs_disabled;
 #ifdef FEATURE_RUNTIME_PM
 	struct hif_runtime_pm_ctx rpm_ctx;
 #endif
 
 	void (*hif_ipci_get_soc_info)(struct hif_ipci_softc *sc,
 				      struct device *dev);
+#ifdef FEATURE_HAL_DELAYED_REG_WRITE
+	uint32_t ep_awake_reset_fail;
+	uint32_t prevent_l1_fail;
+	uint32_t ep_awake_set_fail;
+	bool prevent_l1;
+#endif
 #ifdef FORCE_WAKE
 	struct hif_ipci_stats stats;
+#endif
+#ifdef HIF_CPU_PERF_AFFINE_MASK
+	/* Stores the affinity hint mask for each CE IRQ */
+	qdf_cpu_mask ce_irq_cpu_mask[CE_COUNT_MAX];
 #endif
 };
 

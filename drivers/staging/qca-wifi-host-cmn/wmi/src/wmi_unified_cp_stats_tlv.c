@@ -29,6 +29,21 @@ get_stats_req_twt_dialog_id(struct infra_cp_stats_cmd_info *req)
 	return req->dialog_id;
 }
 
+static enum WMI_HOST_GET_STATS_TWT_STATUS
+wmi_get_converted_twt_get_stats_status(WMI_GET_STATS_TWT_STATUS_T tgt_status)
+{
+	switch (tgt_status) {
+	case WMI_GET_STATS_TWT_STATUS_OK:
+		return WMI_HOST_GET_STATS_TWT_STATUS_OK;
+	case WMI_GET_STATS_TWT_STATUS_DIALOG_ID_NOT_EXIST:
+		return WMI_HOST_GET_STATS_TWT_STATUS_DIALOG_ID_NOT_EXIST;
+	case WMI_GET_STATS_TWT_STATUS_INVALID_PARAM:
+		return WMI_HOST_GET_STATS_TWT_STATUS_INVALID_PARAM;
+	default:
+		return WMI_HOST_GET_STATS_TWT_STATUS_UNKNOWN_ERROR;
+	}
+}
+
 static inline
 void wmi_extract_ctrl_path_twt_stats_tlv(void *tag_buf,
 					 struct twt_infra_cp_stats_event *param)
@@ -37,7 +52,7 @@ void wmi_extract_ctrl_path_twt_stats_tlv(void *tag_buf,
 			(wmi_ctrl_path_twt_stats_struct *)tag_buf;
 
 	param->dialog_id = wmi_stats_buf->dialog_id;
-	param->status = wmi_stats_buf->status;
+	param->status = wmi_get_converted_twt_get_stats_status(wmi_stats_buf->status);
 	param->num_sp_cycles = wmi_stats_buf->num_sp_cycles;
 	param->avg_sp_dur_us = wmi_stats_buf->avg_sp_dur_us;
 	param->min_sp_dur_us = wmi_stats_buf->min_sp_dur_us;
@@ -135,8 +150,10 @@ QDF_STATUS wmi_stats_handler(void *buff, int32_t len,
 	uint8_t *tag_start_ptr;
 
 	param_buf = (WMI_CTRL_PATH_STATS_EVENTID_param_tlvs *)buff;
-	if (!param_buf)
+	if (!param_buf) {
+		wmi_err_rl("param_buf is NULL");
 		return QDF_STATUS_E_FAILURE;
+	}
 	ev = (wmi_ctrl_path_stats_event_fixed_param *)param_buf->fixed_param;
 
 	curr_tlv_tag = WMITLV_GET_TLVTAG(ev->tlv_header);
@@ -375,6 +392,7 @@ send_stats_request_cmd_tlv(wmi_unified_t wmi_handle,
 	wmi_request_stats_cmd_fixed_param *cmd;
 	wmi_buf_t buf;
 	uint16_t len = sizeof(wmi_request_stats_cmd_fixed_param);
+	bool is_qmi_send_support;
 
 	buf = wmi_buf_alloc(wmi_handle, len);
 	if (!buf)
@@ -390,15 +408,18 @@ send_stats_request_cmd_tlv(wmi_unified_t wmi_handle,
 	cmd->pdev_id = wmi_handle->ops->convert_pdev_id_host_to_target(
 							wmi_handle,
 							param->pdev_id);
+	is_qmi_send_support = param->is_qmi_send_support;
 
 	WMI_CHAR_ARRAY_TO_MAC_ADDR(macaddr, &cmd->peer_macaddr);
 
-	wmi_debug("STATS REQ STATS_ID:%d VDEV_ID:%d PDEV_ID:%d-->",
-		 cmd->stats_id, cmd->vdev_id, cmd->pdev_id);
+	wmi_debug("STATS REQ STATS_ID:%d VDEV_ID:%d PDEV_ID:%d, is_qmi_send_support %d",
+		  cmd->stats_id, cmd->vdev_id, cmd->pdev_id,
+		  is_qmi_send_support);
 
 	wmi_mtrace(WMI_REQUEST_STATS_CMDID, cmd->vdev_id, 0);
 	ret = wmi_unified_cmd_send_pm_chk(wmi_handle, buf, len,
-					  WMI_REQUEST_STATS_CMDID);
+					  WMI_REQUEST_STATS_CMDID,
+					  is_qmi_send_support);
 
 	if (ret) {
 		wmi_err("Failed to send stats request to fw =%d", ret);

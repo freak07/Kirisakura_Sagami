@@ -195,6 +195,9 @@ struct wlan_srng_cfg {
  * @is_swlm_enabled: flag to enable/disable SWLM
  * @tx_per_pkt_vdev_id_check: Enable tx perpkt vdev id check
  * @wow_check_rx_pending_enable: Enable RX frame pending check in WoW
+ * @ipa_tx_ring_size: IPA tx ring size
+ * @ipa_tx_comp_ring_size: IPA tx completion ring size
+ * @pkt_capture_mode: Packet capture mode config
  */
 struct wlan_cfg_dp_soc_ctxt {
 	int num_int_ctxts;
@@ -310,6 +313,13 @@ struct wlan_cfg_dp_soc_ctxt {
 	bool fst_in_cmem;
 	bool tx_per_pkt_vdev_id_check;
 	bool wow_check_rx_pending_enable;
+#ifdef IPA_OFFLOAD
+	uint32_t ipa_tx_ring_size;
+	uint32_t ipa_tx_comp_ring_size;
+#endif
+#ifdef WLAN_FEATURE_PKT_CAPTURE_V2
+	uint32_t pkt_capture_mode;
+#endif
 };
 
 /**
@@ -328,6 +338,26 @@ struct wlan_cfg_dp_pdev_ctxt {
 	int rxdma_monitor_desc_ring;
 	int num_mac_rings;
 	int nss_enabled;
+};
+
+/**
+ * struct wlan_dp_prealloc_cfg - DP prealloc related config
+ * @num_tx_ring_entries: num of tcl data ring entries
+ * @num_tx_comp_ring_entries: num of tx comp ring entries
+ * @num_wbm_rel_ring_entries: num of wbm err ring entries
+ * @num_rxdma_err_dst_ring_entries: num of rxdma err ring entries
+ * @num_reo_exception_ring_entries: num of rx exception ring entries
+ * @num_tx_desc: num of tx descriptors
+ * @num_tx_ext_desc: num of tx ext descriptors
+ */
+struct wlan_dp_prealloc_cfg {
+	int num_tx_ring_entries;
+	int num_tx_comp_ring_entries;
+	int num_wbm_rel_ring_entries;
+	int num_rxdma_err_dst_ring_entries;
+	int num_reo_exception_ring_entries;
+	int num_tx_desc;
+	int num_tx_ext_desc;
 };
 
 /**
@@ -1499,4 +1529,61 @@ bool wlan_cfg_is_swlm_enabled(struct wlan_cfg_dp_soc_ctxt *cfg);
  * Return: force use 64 BA flag
  */
 bool wlan_cfg_is_dp_force_rx_64_ba(struct wlan_cfg_dp_soc_ctxt *cfg);
+
+#ifdef IPA_OFFLOAD
+/*
+ * wlan_cfg_ipa_tx_ring_size - Get Tx DMA ring size (TCL Data Ring)
+ * @wlan_cfg_soc_ctx: dp cfg context
+ *
+ * Return: IPA Tx Ring Size
+ */
+uint32_t wlan_cfg_ipa_tx_ring_size(struct wlan_cfg_dp_soc_ctxt *cfg);
+
+/*
+ * wlan_cfg_ipa_tx_comp_ring_size - Get Tx completion ring size (WBM Ring)
+ * @wlan_cfg_soc_ctx: dp cfg context
+ *
+ * Return: IPA Tx Completion ring size
+ */
+uint32_t wlan_cfg_ipa_tx_comp_ring_size(struct wlan_cfg_dp_soc_ctxt *cfg);
+#else
+static inline
+uint32_t wlan_cfg_ipa_tx_ring_size(struct wlan_cfg_dp_soc_ctxt *cfg)
+{
+	return 0;
+}
+
+static inline
+uint32_t wlan_cfg_ipa_tx_comp_ring_size(struct wlan_cfg_dp_soc_ctxt *cfg)
+{
+	return 0;
+}
+#endif
+
+/**
+ * wlan_cfg_get_prealloc_cfg() - Get dp prealloc related cfg param
+ * @ctrl_psoc - PSOC object
+ * @cfg - cfg ctx where values will be populated
+ *
+ * Return: None
+ */
+void
+wlan_cfg_get_prealloc_cfg(struct cdp_ctrl_objmgr_psoc *ctrl_psoc,
+			  struct wlan_dp_prealloc_cfg *cfg);
+
+#ifdef WLAN_FEATURE_PKT_CAPTURE_V2
+/**
+ * wlan_cfg_get_pkt_capture_mode() - Get packet capture mode config
+ * @cfg: config context
+ *
+ * Return: value of packet capture mode
+ */
+uint32_t wlan_cfg_get_pkt_capture_mode(struct wlan_cfg_dp_soc_ctxt *cfg);
+#else
+static inline
+uint32_t wlan_cfg_get_pkt_capture_mode(struct wlan_cfg_dp_soc_ctxt *cfg)
+{
+	return 0;
+}
+#endif
 #endif

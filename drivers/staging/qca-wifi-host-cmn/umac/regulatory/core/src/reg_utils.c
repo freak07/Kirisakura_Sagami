@@ -169,6 +169,14 @@ bool reg_is_us_alpha2(uint8_t *alpha2)
 	return false;
 }
 
+bool reg_is_etsi_alpha2(uint8_t *alpha2)
+{
+	if ((alpha2[0] == 'G') && (alpha2[1] == 'B'))
+		return true;
+
+	return false;
+}
+
 QDF_STATUS reg_set_country(struct wlan_objmgr_pdev *pdev,
 			   uint8_t *country)
 {
@@ -312,6 +320,37 @@ QDF_STATUS reg_get_domain_from_country_code(v_REGDOMAIN_t *reg_domain_ptr,
 
 	return QDF_STATUS_SUCCESS;
 }
+
+#ifdef CONFIG_REG_CLIENT
+QDF_STATUS
+reg_get_6g_power_type_for_ctry(uint8_t *ap_ctry, uint8_t *sta_ctry,
+			       enum reg_6g_ap_type *pwr_type_6g,
+			       bool *ctry_code_match)
+{
+	*pwr_type_6g = REG_INDOOR_AP;
+
+	if (qdf_mem_cmp(ap_ctry, sta_ctry, REG_ALPHA2_LEN)) {
+		reg_debug("Country IE:%c%c, STA country:%c%c", ap_ctry[0],
+			  ap_ctry[1], sta_ctry[0], sta_ctry[1]);
+		*ctry_code_match = false;
+
+		if (wlan_reg_is_us(sta_ctry)) {
+			reg_err("US VLP not in place yet, connection not allowed");
+			return QDF_STATUS_E_NOSUPPORT;
+		}
+
+		if (wlan_reg_is_etsi(sta_ctry)) {
+			reg_debug("STA ctry:%c%c, doesn't match with AP ctry, switch to VLP",
+				 sta_ctry[0], sta_ctry[1]);
+			*pwr_type_6g = REG_VERY_LOW_POWER_AP;
+		}
+	} else {
+		*ctry_code_match = true;
+	}
+
+	return QDF_STATUS_SUCCESS;
+}
+#endif
 
 #ifdef CONFIG_CHAN_NUM_API
 bool reg_is_passive_or_disable_ch(struct wlan_objmgr_pdev *pdev,
@@ -772,10 +811,32 @@ enum reg_6g_ap_type reg_decide_6g_ap_pwr_type(struct wlan_objmgr_pdev *pdev)
 		 pdev_priv_obj->reg_6g_superid != FCC1_6G_CL)
 		ap_pwr_type = REG_VERY_LOW_POWER_AP;
 
-	reg_set_cur_6g_ap_pwr_type(pdev, ap_pwr_type);
-	reg_compute_pdev_current_chan_list(pdev_priv_obj);
+	reg_set_ap_pwr_and_update_chan_list(pdev, ap_pwr_type);
 
 	return ap_pwr_type;
+}
+
+QDF_STATUS reg_set_ap_pwr_and_update_chan_list(struct wlan_objmgr_pdev *pdev,
+					       enum reg_6g_ap_type ap_pwr_type)
+{
+	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
+	QDF_STATUS status;
+
+	pdev_priv_obj = reg_get_pdev_obj(pdev);
+	if (!IS_VALID_PDEV_REG_OBJ(pdev_priv_obj)) {
+		reg_err("pdev reg component is NULL");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	status = reg_set_cur_6g_ap_pwr_type(pdev, ap_pwr_type);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		reg_debug("failed to set AP power type to %d", ap_pwr_type);
+		return status;
+	}
+
+	reg_compute_pdev_current_chan_list(pdev_priv_obj);
+
+	return QDF_STATUS_SUCCESS;
 }
 #endif /* CONFIG_BAND_6GHZ */
 
