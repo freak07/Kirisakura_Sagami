@@ -315,6 +315,14 @@ static struct afe_clkinfo_per_port clkinfo_per_port[] = {
 		MCLK_SRC_INT, Q6AFE_EXT_MCLK_FREQ_DEFAULT, ""},
 	{ AFE_PORT_ID_SENARY_TDM_RX,
 		MCLK_SRC_INT, Q6AFE_EXT_MCLK_FREQ_DEFAULT, ""},
+	{ AFE_PORT_ID_SEPTENARY_TDM_RX,
+		MCLK_SRC_INT, Q6AFE_EXT_MCLK_FREQ_DEFAULT, ""},
+	{ AFE_PORT_ID_HSIF0_TDM_RX,
+		MCLK_SRC_INT, Q6AFE_EXT_MCLK_FREQ_DEFAULT, ""},
+	{ AFE_PORT_ID_HSIF1_TDM_RX,
+		MCLK_SRC_INT, Q6AFE_EXT_MCLK_FREQ_DEFAULT, ""},
+	{ AFE_PORT_ID_HSIF2_TDM_RX,
+		MCLK_SRC_INT, Q6AFE_EXT_MCLK_FREQ_DEFAULT, ""},
 	{ AFE_PORT_ID_PRIMARY_SPDIF_RX,
 		MCLK_SRC_INT, Q6AFE_EXT_MCLK_FREQ_DEFAULT, ""},
 	{ AFE_PORT_ID_PRIMARY_SPDIF_TX,
@@ -435,7 +443,8 @@ static int q6afe_load_avcs_modules(int num_modules, u16 port_id,
 						AVS_MODULE_ID_DEPACKETIZER_COP;
 					goto load_unload;
 				}
-				if (format_id == ASM_MEDIA_FMT_LC3) {
+				if (format_id == ASM_MEDIA_FMT_LC3 ||
+				    format_id == ASM_MEDIA_FMT_APTX_ADAPTIVE) {
 					pm[i]->payload->load_unload_info[0].id1 =
 					AVS_MODULE_ID_DEPACKETIZER_COP_V2;
 					goto load_unload;
@@ -4015,7 +4024,8 @@ int afe_port_set_mad_type(u16 port_id, enum afe_mad_type mad_type)
 	if (port_id == AFE_PORT_ID_TERTIARY_MI2S_TX ||
 		port_id == AFE_PORT_ID_INT3_MI2S_TX ||
 		port_id == AFE_PORT_ID_TX_CODEC_DMA_TX_3 ||
-		port_id == AFE_PORT_ID_TERTIARY_TDM_TX) {
+		port_id == AFE_PORT_ID_TERTIARY_TDM_TX ||
+		port_id == RT_PROXY_PORT_001_TX) {
 		mad_type = MAD_SW_AUDIO;
 		return 0;
 	}
@@ -4045,7 +4055,8 @@ enum afe_mad_type afe_port_get_mad_type(u16 port_id)
 	if (port_id == AFE_PORT_ID_TERTIARY_MI2S_TX ||
 		port_id == AFE_PORT_ID_INT3_MI2S_TX ||
 		port_id == AFE_PORT_ID_TX_CODEC_DMA_TX_3 ||
-		port_id == AFE_PORT_ID_TERTIARY_TDM_TX)
+		port_id == AFE_PORT_ID_TERTIARY_TDM_TX ||
+		port_id == RT_PROXY_PORT_001_TX)
 		return MAD_SW_AUDIO;
 
 	i = port_id - SLIMBUS_0_RX;
@@ -4824,7 +4835,7 @@ int afe_port_send_logging_cfg(u16 port_id,
 	param_hdr.module_id = AFE_MODULE_AUDIO_DEV_INTERFACE;
 	param_hdr.instance_id = INSTANCE_ID_0;
 	param_hdr.param_id = AFE_PARAM_ID_PORT_DATA_LOGGING_DISABLE;
-	param_hdr.param_size = sizeof(&log_disable);
+	param_hdr.param_size = sizeof(struct afe_param_id_port_data_log_disable_t);
 
 	ret = q6afe_pack_and_set_param_in_band(port_id,
 		q6audio_get_port_index(port_id), param_hdr, (u8*)log_disable);
@@ -4973,6 +4984,7 @@ static int q6afe_send_dec_config(u16 port_id,
 	struct asm_aptx_ad_speech_mode_cfg_t speech_codec_init_param;
 	struct param_hdr_v3 param_hdr;
 	struct avs_cop_v2_param_id_stream_info_t lc3_enc_stream_info;
+	struct afe_lc3_dec_cfg_t lc3_dec_config_init;
 	int ret;
 	u32 dec_fmt;
 
@@ -4983,6 +4995,7 @@ static int q6afe_send_dec_config(u16 port_id,
 	memset(&matched_port_param, 0, sizeof(matched_port_param));
 	memset(&speech_codec_init_param, 0, sizeof(speech_codec_init_param));
 	memset(&lc3_enc_stream_info, 0, sizeof(lc3_enc_stream_info));
+	memset(&lc3_dec_config_init, 0, sizeof(lc3_dec_config_init));
 	memset(&param_hdr, 0, sizeof(param_hdr));
 
 	param_hdr.module_id = AFE_MODULE_ID_DECODER;
@@ -5168,6 +5181,55 @@ static int q6afe_send_dec_config(u16 port_id,
 	}
 
 	if (format == ASM_MEDIA_FMT_LC3) {
+		if (cfg->data.lc3_dec_config.dec_codec.from_Air_cfg
+			    .stream_map_size != 0) {
+			/* create LC3 deocder before sending init params */
+			pr_debug("%s: sending AFE_DECODER_PARAM_ID_DEC_MEDIA_FMT to DSP payload\n",
+				  __func__);
+			param_hdr.module_id = AFE_MODULE_ID_DECODER;
+			param_hdr.instance_id = INSTANCE_ID_0;
+			param_hdr.param_id = AFE_DECODER_PARAM_ID_DEC_FMT_ID;
+			param_hdr.param_size = sizeof(dec_fmt);
+			dec_fmt = format;
+			ret = q6afe_pack_and_set_param_in_band(port_id,
+							       q6audio_get_port_index(port_id),
+							       param_hdr, (u8 *) &dec_fmt);
+			if (ret) {
+				pr_err("%s: AFE_DECODER_PARAM_ID_DEC_MEDIA_FMT for port 0x%x failed %d\n",
+					__func__, port_id, ret);
+				goto exit;
+			}
+
+			pr_debug("%s: sending CAPI_V2_PARAM_LC3_DEC_MODULE_INIT to DSP\n",
+				__func__);
+			param_hdr.param_id = CAPI_V2_PARAM_LC3_DEC_MODULE_INIT;
+			param_hdr.param_size = sizeof(struct afe_lc3_dec_cfg_t);
+			lc3_dec_config_init =
+				cfg->data.lc3_dec_config.dec_codec.from_Air_cfg;
+			ret = q6afe_pack_and_set_param_in_band(
+				port_id, q6audio_get_port_index(port_id),
+				param_hdr, (u8 *)&lc3_dec_config_init);
+			if (ret) {
+				pr_err("%s: CAPI_V2_PARAM_LC3_DEC_MODULE_INIT for port 0x%x failed %d\n",
+				       __func__, port_id, ret);
+				goto exit;
+			}
+
+			pr_debug("%s: sending AVS_COP_V2_PARAM_ID_STREAM_INFO to DSP\n",
+				__func__);
+			param_hdr.param_id = AVS_COP_V2_PARAM_ID_STREAM_INFO;
+			param_hdr.param_size = sizeof(
+				struct avs_cop_v2_param_id_stream_info_t);
+			lc3_enc_stream_info = cfg->data.lc3_dec_config.dec_codec.streamMapFromAir;
+			ret = q6afe_pack_and_set_param_in_band(
+				port_id, q6audio_get_port_index(port_id),
+				param_hdr, (u8 *)&lc3_enc_stream_info);
+			if (ret) {
+				pr_err("%s: AVS_COP_V2_PARAM_ID_STREAM_INFO for port 0x%x failed %d\n",
+				       __func__, port_id, ret);
+				goto exit;
+			}
+		}
 		pr_debug("%s: sending AVS_COP_V2_PARAM_ID_STREAM_INFO to DSP\n",
 			 __func__);
 		param_hdr.module_id = AFE_MODULE_ID_DECODER;
@@ -5759,11 +5821,12 @@ static int __afe_port_start(u16 port_id, union afe_port_config *afe_config,
 	union afe_port_config port_cfg;
 	struct param_hdr_v3 param_hdr;
 	int ret = 0;
-	int cfg_type;
+	int cfg_type = 0;
 	int index = 0;
 	enum afe_mad_type mad_type;
 	uint16_t port_index;
 	u32 power_mode = 0;
+	u16 i;
 
 	memset(&param_hdr, 0, sizeof(param_hdr));
 	memset(&port_cfg, 0, sizeof(port_cfg));
@@ -6189,8 +6252,21 @@ static int __afe_port_start(u16 port_id, union afe_port_config *afe_config,
 	ret = afe_send_cmd_port_start(port_id);
 
 fail_cmd:
-	if (ret)
+	if (ret) {
 		this_afe.afe_port_start_failed[port_index] = true;
+		if ((codec_format != ASM_MEDIA_FMT_NONE) &&
+			(cfg_type == AFE_PARAM_ID_SLIMBUS_CONFIG)) {
+			if ((q6core_get_avcs_api_version_per_service(
+				APRV2_IDS_SERVICE_ID_ADSP_CORE_V) >= AVCS_API_VERSION_V5)) {
+				for (i = 0; i < MAX_ALLOWED_USE_CASES; i++) {
+					if (pm[i] && pm[i]->port_id == port_id) {
+						q6afe_unload_avcs_modules(port_id, i);
+						break;
+					}
+				}
+			}
+		}
+	}
 	mutex_unlock(&this_afe.afe_cmd_lock);
 	return ret;
 }
@@ -6659,6 +6735,134 @@ int afe_get_port_index(u16 port_id)
 		return IDX_RT_PROXY_PORT_002_RX;
 	case RT_PROXY_PORT_002_TX:
 		return IDX_RT_PROXY_PORT_002_TX;
+	case AFE_PORT_ID_SEPTENARY_TDM_RX:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_RX_0;
+	case AFE_PORT_ID_SEPTENARY_TDM_TX:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_TX_0;
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_1:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_RX_1;
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_1:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_TX_1;
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_2:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_RX_2;
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_2:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_TX_2;
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_3:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_RX_3;
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_3:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_TX_3;
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_4:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_RX_4;
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_4:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_TX_4;
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_5:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_RX_5;
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_5:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_TX_5;
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_6:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_RX_6;
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_6:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_TX_6;
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_7:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_RX_7;
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_7:
+		return IDX_AFE_PORT_ID_SEPTENARY_TDM_TX_7;
+	case AFE_PORT_ID_HSIF0_TDM_RX:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_RX_0;
+	case AFE_PORT_ID_HSIF0_TDM_TX:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_TX_0;
+	case AFE_PORT_ID_HSIF0_TDM_RX_1:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_RX_1;
+	case AFE_PORT_ID_HSIF0_TDM_TX_1:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_TX_1;
+	case AFE_PORT_ID_HSIF0_TDM_RX_2:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_RX_2;
+	case AFE_PORT_ID_HSIF0_TDM_TX_2:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_TX_2;
+	case AFE_PORT_ID_HSIF0_TDM_RX_3:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_RX_3;
+	case AFE_PORT_ID_HSIF0_TDM_TX_3:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_TX_3;
+	case AFE_PORT_ID_HSIF0_TDM_RX_4:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_RX_4;
+	case AFE_PORT_ID_HSIF0_TDM_TX_4:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_TX_4;
+	case AFE_PORT_ID_HSIF0_TDM_RX_5:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_RX_5;
+	case AFE_PORT_ID_HSIF0_TDM_TX_5:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_TX_5;
+	case AFE_PORT_ID_HSIF0_TDM_RX_6:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_RX_6;
+	case AFE_PORT_ID_HSIF0_TDM_TX_6:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_TX_6;
+	case AFE_PORT_ID_HSIF0_TDM_RX_7:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_RX_7;
+	case AFE_PORT_ID_HSIF0_TDM_TX_7:
+		return IDX_AFE_PORT_ID_HSIF0_TDM_TX_7;
+	case AFE_PORT_ID_HSIF1_TDM_RX:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_RX_0;
+	case AFE_PORT_ID_HSIF1_TDM_TX:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_TX_0;
+	case AFE_PORT_ID_HSIF1_TDM_RX_1:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_RX_1;
+	case AFE_PORT_ID_HSIF1_TDM_TX_1:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_TX_1;
+	case AFE_PORT_ID_HSIF1_TDM_RX_2:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_RX_2;
+	case AFE_PORT_ID_HSIF1_TDM_TX_2:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_TX_2;
+	case AFE_PORT_ID_HSIF1_TDM_RX_3:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_RX_3;
+	case AFE_PORT_ID_HSIF1_TDM_TX_3:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_TX_3;
+	case AFE_PORT_ID_HSIF1_TDM_RX_4:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_RX_4;
+	case AFE_PORT_ID_HSIF1_TDM_TX_4:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_TX_4;
+	case AFE_PORT_ID_HSIF1_TDM_RX_5:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_RX_5;
+	case AFE_PORT_ID_HSIF1_TDM_TX_5:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_TX_5;
+	case AFE_PORT_ID_HSIF1_TDM_RX_6:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_RX_6;
+	case AFE_PORT_ID_HSIF1_TDM_TX_6:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_TX_6;
+	case AFE_PORT_ID_HSIF1_TDM_RX_7:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_RX_7;
+	case AFE_PORT_ID_HSIF1_TDM_TX_7:
+		return IDX_AFE_PORT_ID_HSIF1_TDM_TX_7;
+	case AFE_PORT_ID_HSIF2_TDM_RX:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_RX_0;
+	case AFE_PORT_ID_HSIF2_TDM_TX:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_TX_0;
+	case AFE_PORT_ID_HSIF2_TDM_RX_1:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_RX_1;
+	case AFE_PORT_ID_HSIF2_TDM_TX_1:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_TX_1;
+	case AFE_PORT_ID_HSIF2_TDM_RX_2:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_RX_2;
+	case AFE_PORT_ID_HSIF2_TDM_TX_2:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_TX_2;
+	case AFE_PORT_ID_HSIF2_TDM_RX_3:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_RX_3;
+	case AFE_PORT_ID_HSIF2_TDM_TX_3:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_TX_3;
+	case AFE_PORT_ID_HSIF2_TDM_RX_4:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_RX_4;
+	case AFE_PORT_ID_HSIF2_TDM_TX_4:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_TX_4;
+	case AFE_PORT_ID_HSIF2_TDM_RX_5:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_RX_5;
+	case AFE_PORT_ID_HSIF2_TDM_TX_5:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_TX_5;
+	case AFE_PORT_ID_HSIF2_TDM_RX_6:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_RX_6;
+	case AFE_PORT_ID_HSIF2_TDM_TX_6:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_TX_6;
+	case AFE_PORT_ID_HSIF2_TDM_RX_7:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_RX_7;
+	case AFE_PORT_ID_HSIF2_TDM_TX_7:
+		return IDX_AFE_PORT_ID_HSIF2_TDM_TX_7;
 	default:
 		pr_err("%s: port 0x%x\n", __func__, port_id);
 		return -EINVAL;
@@ -7150,6 +7354,14 @@ int afe_port_group_set_param(u16 group_id,
 	case AFE_GROUP_DEVICE_ID_QUINARY_TDM_TX:
 	case AFE_GROUP_DEVICE_ID_SENARY_TDM_RX:
 	case AFE_GROUP_DEVICE_ID_SENARY_TDM_TX:
+	case AFE_GROUP_DEVICE_ID_SEPTENARY_TDM_RX:
+	case AFE_GROUP_DEVICE_ID_SEPTENARY_TDM_TX:
+	case AFE_GROUP_DEVICE_ID_HSIF0_TDM_RX:
+	case AFE_GROUP_DEVICE_ID_HSIF0_TDM_TX:
+	case AFE_GROUP_DEVICE_ID_HSIF1_TDM_RX:
+	case AFE_GROUP_DEVICE_ID_HSIF1_TDM_TX:
+	case AFE_GROUP_DEVICE_ID_HSIF2_TDM_RX:
+	case AFE_GROUP_DEVICE_ID_HSIF2_TDM_TX:
 		cfg_type = AFE_PARAM_ID_GROUP_DEVICE_TDM_CONFIG;
 		break;
 	default:
@@ -8871,6 +9083,70 @@ static bool is_port_valid(u16 port_id)
 	case AFE_PORT_ID_RX_CODEC_DMA_RX_7:
 	case RT_PROXY_PORT_002_RX:
 	case RT_PROXY_PORT_002_TX:
+	case AFE_PORT_ID_SEPTENARY_TDM_RX:
+	case AFE_PORT_ID_SEPTENARY_TDM_TX:
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_1:
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_1:
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_2:
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_2:
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_3:
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_3:
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_4:
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_4:
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_5:
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_5:
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_6:
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_6:
+	case AFE_PORT_ID_SEPTENARY_TDM_RX_7:
+	case AFE_PORT_ID_SEPTENARY_TDM_TX_7:
+	case AFE_PORT_ID_HSIF0_TDM_RX:
+	case AFE_PORT_ID_HSIF0_TDM_TX:
+	case AFE_PORT_ID_HSIF0_TDM_RX_1:
+	case AFE_PORT_ID_HSIF0_TDM_TX_1:
+	case AFE_PORT_ID_HSIF0_TDM_RX_2:
+	case AFE_PORT_ID_HSIF0_TDM_TX_2:
+	case AFE_PORT_ID_HSIF0_TDM_RX_3:
+	case AFE_PORT_ID_HSIF0_TDM_TX_3:
+	case AFE_PORT_ID_HSIF0_TDM_RX_4:
+	case AFE_PORT_ID_HSIF0_TDM_TX_4:
+	case AFE_PORT_ID_HSIF0_TDM_RX_5:
+	case AFE_PORT_ID_HSIF0_TDM_TX_5:
+	case AFE_PORT_ID_HSIF0_TDM_RX_6:
+	case AFE_PORT_ID_HSIF0_TDM_TX_6:
+	case AFE_PORT_ID_HSIF0_TDM_RX_7:
+	case AFE_PORT_ID_HSIF0_TDM_TX_7:
+	case AFE_PORT_ID_HSIF1_TDM_RX:
+	case AFE_PORT_ID_HSIF1_TDM_TX:
+	case AFE_PORT_ID_HSIF1_TDM_RX_1:
+	case AFE_PORT_ID_HSIF1_TDM_TX_1:
+	case AFE_PORT_ID_HSIF1_TDM_RX_2:
+	case AFE_PORT_ID_HSIF1_TDM_TX_2:
+	case AFE_PORT_ID_HSIF1_TDM_RX_3:
+	case AFE_PORT_ID_HSIF1_TDM_TX_3:
+	case AFE_PORT_ID_HSIF1_TDM_RX_4:
+	case AFE_PORT_ID_HSIF1_TDM_TX_4:
+	case AFE_PORT_ID_HSIF1_TDM_RX_5:
+	case AFE_PORT_ID_HSIF1_TDM_TX_5:
+	case AFE_PORT_ID_HSIF1_TDM_RX_6:
+	case AFE_PORT_ID_HSIF1_TDM_TX_6:
+	case AFE_PORT_ID_HSIF1_TDM_RX_7:
+	case AFE_PORT_ID_HSIF1_TDM_TX_7:
+	case AFE_PORT_ID_HSIF2_TDM_RX:
+	case AFE_PORT_ID_HSIF2_TDM_TX:
+	case AFE_PORT_ID_HSIF2_TDM_RX_1:
+	case AFE_PORT_ID_HSIF2_TDM_TX_1:
+	case AFE_PORT_ID_HSIF2_TDM_RX_2:
+	case AFE_PORT_ID_HSIF2_TDM_TX_2:
+	case AFE_PORT_ID_HSIF2_TDM_RX_3:
+	case AFE_PORT_ID_HSIF2_TDM_TX_3:
+	case AFE_PORT_ID_HSIF2_TDM_RX_4:
+	case AFE_PORT_ID_HSIF2_TDM_TX_4:
+	case AFE_PORT_ID_HSIF2_TDM_RX_5:
+	case AFE_PORT_ID_HSIF2_TDM_TX_5:
+	case AFE_PORT_ID_HSIF2_TDM_RX_6:
+	case AFE_PORT_ID_HSIF2_TDM_TX_6:
+	case AFE_PORT_ID_HSIF2_TDM_RX_7:
+	case AFE_PORT_ID_HSIF2_TDM_TX_7:
 	{
 		return true;
 	}
@@ -10755,6 +11031,9 @@ static int afe_set_cal_sp_th_vi_cfg(int32_t cal_type, size_t data_size,
 
 	if (cal_data == NULL ||
 	    data_size > sizeof(*cal_data) ||
+	    (data_size < sizeof(cal_data->cal_hdr) +
+		sizeof(cal_data->cal_data) +
+		sizeof(cal_data->cal_info.mode)) ||
 	    this_afe.cal_data[AFE_FB_SPKR_PROT_TH_VI_CAL] == NULL)
 		goto done;
 
@@ -10972,7 +11251,9 @@ static int afe_get_cal_sp_th_vi_param(int32_t cal_type, size_t data_size,
 
 	if (cal_data == NULL ||
 	    data_size > sizeof(*cal_data) ||
-	    data_size < sizeof(cal_data->cal_hdr) ||
+	    (data_size < sizeof(cal_data->cal_hdr) +
+		sizeof(cal_data->cal_data) +
+		sizeof(cal_data->cal_info.mode)) ||
 	    this_afe.cal_data[AFE_FB_SPKR_PROT_TH_VI_CAL] == NULL)
 		return 0;
 
@@ -11001,8 +11282,7 @@ static int afe_get_cal_spv4_ex_vi_ftm_param(int32_t cal_type, size_t data_size,
 	pr_debug("%s: cal_type = %d\n", __func__, cal_type);
 	if (this_afe.cal_data[AFE_FB_SPKR_PROT_V4_EX_VI_CAL] == NULL ||
 	    cal_data == NULL ||
-	    data_size > sizeof(*cal_data) ||
-	    data_size < sizeof(cal_data->cal_hdr))
+	    data_size != sizeof(*cal_data))
 		goto done;
 
 	mutex_lock(&this_afe.cal_data[AFE_FB_SPKR_PROT_V4_EX_VI_CAL]->lock);
@@ -11069,8 +11349,7 @@ static int afe_get_cal_sp_ex_vi_ftm_param(int32_t cal_type, size_t data_size,
 	pr_debug("%s: cal_type = %d\n", __func__, cal_type);
 	if (this_afe.cal_data[AFE_FB_SPKR_PROT_EX_VI_CAL] == NULL ||
 	    cal_data == NULL ||
-	    data_size > sizeof(*cal_data) ||
-	    data_size < sizeof(cal_data->cal_hdr))
+	    data_size != sizeof(*cal_data))
 		goto done;
 
 	mutex_lock(&this_afe.cal_data[AFE_FB_SPKR_PROT_EX_VI_CAL]->lock);

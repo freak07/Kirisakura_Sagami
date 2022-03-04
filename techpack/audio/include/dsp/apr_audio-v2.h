@@ -1451,7 +1451,7 @@ struct adm_cmd_connect_afe_port_v5 {
 
 /* End of the range of port IDs for TDM devices. */
 #define AFE_PORT_ID_TDM_PORT_RANGE_END \
-	(AFE_PORT_ID_TDM_PORT_RANGE_START+0x60-1)
+	(AFE_PORT_ID_TDM_PORT_RANGE_START+0x100-1)
 
 /* Size of the range of port IDs for TDM ports. */
 #define AFE_PORT_ID_TDM_PORT_RANGE_SIZE \
@@ -1896,6 +1896,142 @@ struct adm_cmd_connect_afe_port_v5 {
 	(AFE_PORT_ID_SENARY_TDM_TX + 0x0C)
 #define AFE_PORT_ID_SENARY_TDM_TX_7 \
 	(AFE_PORT_ID_SENARY_TDM_TX + 0x0E)
+
+#define AFE_PORT_ID_SEPTENARY_TDM_RX \
+	(AFE_PORT_ID_TDM_PORT_RANGE_START + 0x60)
+#define AFE_PORT_ID_SEPTENARY_TDM_RX_1 \
+	(AFE_PORT_ID_SEPTENARY_TDM_RX + 0x02)
+#define AFE_PORT_ID_SEPTENARY_TDM_RX_2 \
+	(AFE_PORT_ID_SEPTENARY_TDM_RX + 0x04)
+#define AFE_PORT_ID_SEPTENARY_TDM_RX_3 \
+	(AFE_PORT_ID_SEPTENARY_TDM_RX + 0x06)
+#define AFE_PORT_ID_SEPTENARY_TDM_RX_4 \
+	(AFE_PORT_ID_SEPTENARY_TDM_RX + 0x08)
+#define AFE_PORT_ID_SEPTENARY_TDM_RX_5 \
+	(AFE_PORT_ID_SEPTENARY_TDM_RX + 0x0A)
+#define AFE_PORT_ID_SEPTENARY_TDM_RX_6 \
+	(AFE_PORT_ID_SEPTENARY_TDM_RX + 0x0C)
+#define AFE_PORT_ID_SEPTENARY_TDM_RX_7 \
+	(AFE_PORT_ID_SEPTENARY_TDM_RX + 0x0E)
+
+#define AFE_PORT_ID_SEPTENARY_TDM_TX \
+	(AFE_PORT_ID_TDM_PORT_RANGE_START + 0x61)
+#define AFE_PORT_ID_SEPTENARY_TDM_TX_1 \
+	(AFE_PORT_ID_SEPTENARY_TDM_TX + 0x02)
+#define AFE_PORT_ID_SEPTENARY_TDM_TX_2 \
+	(AFE_PORT_ID_SEPTENARY_TDM_TX + 0x04)
+#define AFE_PORT_ID_SEPTENARY_TDM_TX_3 \
+	(AFE_PORT_ID_SEPTENARY_TDM_TX + 0x06)
+#define AFE_PORT_ID_SEPTENARY_TDM_TX_4 \
+	(AFE_PORT_ID_SEPTENARY_TDM_TX + 0x08)
+#define AFE_PORT_ID_SEPTENARY_TDM_TX_5 \
+	(AFE_PORT_ID_SEPTENARY_TDM_TX + 0x0A)
+#define AFE_PORT_ID_SEPTENARY_TDM_TX_6 \
+	(AFE_PORT_ID_SEPTENARY_TDM_TX + 0x0C)
+#define AFE_PORT_ID_SEPTENARY_TDM_TX_7 \
+	(AFE_PORT_ID_SEPTENARY_TDM_TX + 0x0E)
+
+#define AFE_PORT_ID_HSIF0_TDM_RX \
+	(AFE_PORT_ID_TDM_PORT_RANGE_START + 0x70)
+#define AFE_PORT_ID_HSIF0_TDM_RX_1 \
+	(AFE_PORT_ID_HSIF0_TDM_RX + 0x02)
+#define AFE_PORT_ID_HSIF0_TDM_RX_2 \
+	(AFE_PORT_ID_HSIF0_TDM_RX + 0x04)
+#define AFE_PORT_ID_HSIF0_TDM_RX_3 \
+	(AFE_PORT_ID_HSIF0_TDM_RX + 0x06)
+#define AFE_PORT_ID_HSIF0_TDM_RX_4 \
+	(AFE_PORT_ID_HSIF0_TDM_RX + 0x08)
+#define AFE_PORT_ID_HSIF0_TDM_RX_5 \
+	(AFE_PORT_ID_HSIF0_TDM_RX + 0x0A)
+#define AFE_PORT_ID_HSIF0_TDM_RX_6 \
+	(AFE_PORT_ID_HSIF0_TDM_RX + 0x0C)
+#define AFE_PORT_ID_HSIF0_TDM_RX_7 \
+	(AFE_PORT_ID_HSIF0_TDM_RX + 0x0E)
+
+#define AFE_PORT_ID_HSIF0_TDM_TX \
+	(AFE_PORT_ID_TDM_PORT_RANGE_START + 0x71)
+#define AFE_PORT_ID_HSIF0_TDM_TX_1 \
+	(AFE_PORT_ID_HSIF0_TDM_TX + 0x02)
+#define AFE_PORT_ID_HSIF0_TDM_TX_2 \
+	(AFE_PORT_ID_HSIF0_TDM_TX + 0x04)
+#define AFE_PORT_ID_HSIF0_TDM_TX_3 \
+	(AFE_PORT_ID_HSIF0_TDM_TX + 0x06)
+#define AFE_PORT_ID_HSIF0_TDM_TX_4 \
+	(AFE_PORT_ID_HSIF0_TDM_TX + 0x08)
+#define AFE_PORT_ID_HSIF0_TDM_TX_5 \
+	(AFE_PORT_ID_HSIF0_TDM_TX + 0x0A)
+#define AFE_PORT_ID_HSIF0_TDM_TX_6 \
+	(AFE_PORT_ID_HSIF0_TDM_TX + 0x0C)
+#define AFE_PORT_ID_HSIF0_TDM_TX_7 \
+	(AFE_PORT_ID_HSIF0_TDM_TX + 0x0E)
+
+#define AFE_PORT_ID_HSIF1_TDM_RX \
+	(AFE_PORT_ID_TDM_PORT_RANGE_START + 0x80)
+#define AFE_PORT_ID_HSIF1_TDM_RX_1 \
+	(AFE_PORT_ID_HSIF1_TDM_RX + 0x02)
+#define AFE_PORT_ID_HSIF1_TDM_RX_2 \
+	(AFE_PORT_ID_HSIF1_TDM_RX + 0x04)
+#define AFE_PORT_ID_HSIF1_TDM_RX_3 \
+	(AFE_PORT_ID_HSIF1_TDM_RX + 0x06)
+#define AFE_PORT_ID_HSIF1_TDM_RX_4 \
+	(AFE_PORT_ID_HSIF1_TDM_RX + 0x08)
+#define AFE_PORT_ID_HSIF1_TDM_RX_5 \
+	(AFE_PORT_ID_HSIF1_TDM_RX + 0x0A)
+#define AFE_PORT_ID_HSIF1_TDM_RX_6 \
+	(AFE_PORT_ID_HSIF1_TDM_RX + 0x0C)
+#define AFE_PORT_ID_HSIF1_TDM_RX_7 \
+	(AFE_PORT_ID_HSIF1_TDM_RX + 0x0E)
+
+#define AFE_PORT_ID_HSIF1_TDM_TX \
+	(AFE_PORT_ID_TDM_PORT_RANGE_START + 0x81)
+#define AFE_PORT_ID_HSIF1_TDM_TX_1 \
+	(AFE_PORT_ID_HSIF1_TDM_TX + 0x02)
+#define AFE_PORT_ID_HSIF1_TDM_TX_2 \
+	(AFE_PORT_ID_HSIF1_TDM_TX + 0x04)
+#define AFE_PORT_ID_HSIF1_TDM_TX_3 \
+	(AFE_PORT_ID_HSIF1_TDM_TX + 0x06)
+#define AFE_PORT_ID_HSIF1_TDM_TX_4 \
+	(AFE_PORT_ID_HSIF1_TDM_TX + 0x08)
+#define AFE_PORT_ID_HSIF1_TDM_TX_5 \
+	(AFE_PORT_ID_HSIF1_TDM_TX + 0x0A)
+#define AFE_PORT_ID_HSIF1_TDM_TX_6 \
+	(AFE_PORT_ID_HSIF1_TDM_TX + 0x0C)
+#define AFE_PORT_ID_HSIF1_TDM_TX_7 \
+	(AFE_PORT_ID_HSIF1_TDM_TX + 0x0E)
+
+#define AFE_PORT_ID_HSIF2_TDM_RX \
+	(AFE_PORT_ID_TDM_PORT_RANGE_START + 0x90)
+#define AFE_PORT_ID_HSIF2_TDM_RX_1 \
+	(AFE_PORT_ID_HSIF2_TDM_RX + 0x02)
+#define AFE_PORT_ID_HSIF2_TDM_RX_2 \
+	(AFE_PORT_ID_HSIF2_TDM_RX + 0x04)
+#define AFE_PORT_ID_HSIF2_TDM_RX_3 \
+	(AFE_PORT_ID_HSIF2_TDM_RX + 0x06)
+#define AFE_PORT_ID_HSIF2_TDM_RX_4 \
+	(AFE_PORT_ID_HSIF2_TDM_RX + 0x08)
+#define AFE_PORT_ID_HSIF2_TDM_RX_5 \
+	(AFE_PORT_ID_HSIF2_TDM_RX + 0x0A)
+#define AFE_PORT_ID_HSIF2_TDM_RX_6 \
+	(AFE_PORT_ID_HSIF2_TDM_RX + 0x0C)
+#define AFE_PORT_ID_HSIF2_TDM_RX_7 \
+	(AFE_PORT_ID_HSIF2_TDM_RX + 0x0E)
+
+#define AFE_PORT_ID_HSIF2_TDM_TX \
+	(AFE_PORT_ID_TDM_PORT_RANGE_START + 0x91)
+#define AFE_PORT_ID_HSIF2_TDM_TX_1 \
+	(AFE_PORT_ID_HSIF2_TDM_TX + 0x02)
+#define AFE_PORT_ID_HSIF2_TDM_TX_2 \
+	(AFE_PORT_ID_HSIF2_TDM_TX + 0x04)
+#define AFE_PORT_ID_HSIF2_TDM_TX_3 \
+	(AFE_PORT_ID_HSIF2_TDM_TX + 0x06)
+#define AFE_PORT_ID_HSIF2_TDM_TX_4 \
+	(AFE_PORT_ID_HSIF2_TDM_TX + 0x08)
+#define AFE_PORT_ID_HSIF2_TDM_TX_5 \
+	(AFE_PORT_ID_HSIF2_TDM_TX + 0x0A)
+#define AFE_PORT_ID_HSIF2_TDM_TX_6 \
+	(AFE_PORT_ID_HSIF2_TDM_TX + 0x0C)
+#define AFE_PORT_ID_HSIF2_TDM_TX_7 \
+	(AFE_PORT_ID_HSIF2_TDM_TX + 0x0E)
 
 #define AFE_PORT_ID_INVALID             0xFFFF
 
@@ -4547,16 +4683,18 @@ struct afe_lc3_dec_cfg_t {
 	struct afe_lc3_cfg_t FromAir;
 	uint32_t decoder_output_channel;
 	uint32_t stream_map_size;
-	struct afe_stream_map_t streamMapIn[16];
+	struct afe_stream_map_t streamMapIn[2];
 } __packed;
 
 struct avs_cop_v2_param_id_stream_info_t {
 	uint32_t stream_map_size;
-	struct afe_lc3_stream_map_t streamMap[16];
+	struct afe_lc3_stream_map_t streamMap[2];
 } __packed;
 
 struct afe_lc3_dec_config_t {
+	struct afe_lc3_dec_cfg_t from_Air_cfg;
 	struct avs_cop_v2_param_id_stream_info_t streamMapToAir;
+	struct avs_cop_v2_param_id_stream_info_t streamMapFromAir;
 } __packed;
 
 struct afe_lc3_enc_config_t {
@@ -12197,6 +12335,22 @@ enum afe_lpass_clk_mode {
 #define Q6AFE_LPASS_CLK_ID_SEN_TDM_IBIT                           0x20B
 /** Clock ID for Senary TDM EBIT */
 #define Q6AFE_LPASS_CLK_ID_SEN_TDM_EBIT                           0x20C
+/** Clock ID for Septenary TDM IBIT */
+#define Q6AFE_LPASS_CLK_ID_SEP_TDM_IBIT                           0x20D
+/** Clock ID for Septenary TDM EBIT */
+#define Q6AFE_LPASS_CLK_ID_SEP_TDM_EBIT                           0x20E
+/** Clock ID for Hsif0 TDM IBIT */
+#define Q6AFE_LPASS_CLK_ID_HSIF0_TDM_IBIT                          0x20F
+/** Clock ID for Hsif0 TDM EBIT */
+#define Q6AFE_LPASS_CLK_ID_HSIF0_TDM_EBIT                          0x210
+/** Clock ID for Hsif1 TDM IBIT */
+#define Q6AFE_LPASS_CLK_ID_HSIF1_TDM_IBIT                          0x211
+/** Clock ID for Hsif1 TDM EBIT */
+#define Q6AFE_LPASS_CLK_ID_HSIF1_TDM_EBIT                          0x212
+/** Clock ID for Hsif2 TDM IBIT */
+#define Q6AFE_LPASS_CLK_ID_HSIF2_TDM_IBIT                           0x213
+/** Clock ID for Hsif2 TDM EBIT */
+#define Q6AFE_LPASS_CLK_ID_HSIF2_TDM_EBIT                           0x214
 
 /* Clock ID for MCLK1 */
 #define Q6AFE_LPASS_CLK_ID_MCLK_1                                 0x300
@@ -12651,7 +12805,22 @@ struct afe_group_device_group_cfg {
 	(AFE_PORT_ID_SENARY_TDM_RX + 0x100)
 #define AFE_GROUP_DEVICE_ID_SENARY_TDM_TX \
 	(AFE_PORT_ID_SENARY_TDM_TX + 0x100)
-
+#define AFE_GROUP_DEVICE_ID_SEPTENARY_TDM_RX \
+	(AFE_PORT_ID_SEPTENARY_TDM_RX + 0x100)
+#define AFE_GROUP_DEVICE_ID_SEPTENARY_TDM_TX \
+	(AFE_PORT_ID_SEPTENARY_TDM_TX + 0x100)
+#define AFE_GROUP_DEVICE_ID_HSIF0_TDM_RX \
+	(AFE_PORT_ID_HSIF0_TDM_RX + 0x100)
+#define AFE_GROUP_DEVICE_ID_HSIF0_TDM_TX \
+	(AFE_PORT_ID_HSIF0_TDM_TX + 0x100)
+#define AFE_GROUP_DEVICE_ID_HSIF1_TDM_RX \
+	(AFE_PORT_ID_HSIF1_TDM_RX + 0x100)
+#define AFE_GROUP_DEVICE_ID_HSIF1_TDM_TX \
+	(AFE_PORT_ID_HSIF1_TDM_TX + 0x100)
+#define AFE_GROUP_DEVICE_ID_HSIF2_TDM_RX \
+	(AFE_PORT_ID_HSIF2_TDM_RX + 0x100)
+#define AFE_GROUP_DEVICE_ID_HSIF2_TDM_TX \
+	(AFE_PORT_ID_HSIF2_TDM_TX + 0x100)
 /* ID of the parameter used by #AFE_MODULE_GROUP_DEVICE to configure the
  * group device. #AFE_SVC_CMD_SET_PARAM can use this parameter ID.
  *

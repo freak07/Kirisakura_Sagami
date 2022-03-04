@@ -31,7 +31,7 @@
 #include <dsp/q6audio-v2.h>
 #include <dsp/q6core.h>
 #include <dsp/q6asm-v2.h>
-#ifdef CONFIG_MSM_BOOT_TIME_MARKER
+#ifdef CONFIG_MSM_BOOT_STATS
 #include <soc/qcom/boot_stats.h>
 #endif
 
@@ -205,6 +205,23 @@ static void event_handler(uint32_t opcode,
 		prtd->in_frame_info[buf_index].offset = payload[5];
 		/* assume data size = 0 during flushing */
 		if (prtd->in_frame_info[buf_index].size) {
+			if ((int)substream->runtime->control->appl_ptr == 0 && prtd->in_frame_info[buf_index].size < prtd->pcm_count) {
+				pr_debug("%s:skip first buffer until get full buffer size=%d: prtd->pcm_count=%d\n",
+						__func__, prtd->in_frame_info[buf_index].size, prtd->pcm_count);
+				memset(&prtd->in_frame_info[buf_index], 0,
+						sizeof(struct msm_audio_in_frame_info));
+				if (q6asm_is_cpu_buf_avail_nolock(OUT, prtd->audio_client,&size, &idx) &&
+						(substream->runtime->status->state == SNDRV_PCM_STATE_RUNNING)) {
+					ret = q6asm_read_nolock(prtd->audio_client);
+					if (ret < 0) {
+						pr_err("%s:q6asm read failed\n",__func__);
+						ret = -EFAULT;
+						q6asm_cpu_buf_release_nolock(OUT, prtd->audio_client);
+					}
+				}
+			return;
+			}
+
 			prtd->pcm_irq_pos +=
 				prtd->in_frame_info[buf_index].size;
 			pr_debug("pcm_irq_pos=%d\n", prtd->pcm_irq_pos);
@@ -682,7 +699,7 @@ static int msm_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 		if (first_time) {
-#ifdef CONFIG_MSM_BOOT_TIME_MARKER
+#ifdef CONFIG_MSM_BOOT_STATS
 			place_marker("K - Early chime");
 #endif
 			first_time = 0;
@@ -1870,6 +1887,8 @@ static int msm_pcm_chmap_ctl_put(struct snd_kcontrol *kcontrol,
 	struct msm_pcm_channel_map *chmap;
 	u64 fe_id = kcontrol->private_value & 0xFF;
 	int session_type = (kcontrol->private_value >> 8) & 0xFF;
+	bool reset_override_out_ch_map = false;
+	bool reset_override_in_ch_map = false;
 
 	pr_debug("%s: chmap ctl for fe_id: %d, session_type: %d\n",
 			__func__, fe_id, session_type);
@@ -1922,20 +1941,33 @@ static int msm_pcm_chmap_ctl_put(struct snd_kcontrol *kcontrol,
 				(char)(ucontrol->value.integer.value[i]);
 
 		/* update chmixer_pspd chmap cached with routing driver as well */
-		if (rtd) {
-			if (component) {
-				fe_id = rtd->dai_link->id;
-				chmixer_pspd = pdata ?
-					pdata->chmixer_pspd[fe_id][SESSION_TYPE_RX] : NULL;
+		if (rtd && component) {
+			fe_id = rtd->dai_link->id;
+			chmixer_pspd = pdata ?
+				pdata->chmixer_pspd[fe_id][session_type] : NULL;
 
-				if (chmixer_pspd && chmixer_pspd->enable) {
+			if (chmixer_pspd && chmixer_pspd->enable) {
+				if (session_type == SESSION_TYPE_RX &&
+					!chmixer_pspd->override_in_ch_map) {
 					for (i = 0; i < PCM_FORMAT_MAX_NUM_CHANNEL_V8; i++)
 						chmixer_pspd->in_ch_map[i] = prtd->channel_map[i];
 					chmixer_pspd->override_in_ch_map = true;
-					msm_pcm_routing_set_channel_mixer_cfg(fe_id,
-							SESSION_TYPE_RX, chmixer_pspd);
+					reset_override_in_ch_map = true;
+				} else if (session_type == SESSION_TYPE_TX &&
+							!chmixer_pspd->override_out_ch_map) {
+					for (i = 0; i < PCM_FORMAT_MAX_NUM_CHANNEL_V8; i++)
+						chmixer_pspd->out_ch_map[i] = prtd->channel_map[i];
+					chmixer_pspd->override_out_ch_map = true;
+					reset_override_out_ch_map = true;
 				}
+				msm_pcm_routing_set_channel_mixer_cfg(fe_id,
+						session_type, chmixer_pspd);
+				if (reset_override_out_ch_map)
+					chmixer_pspd->override_out_ch_map = false;
+				if (reset_override_in_ch_map)
+					chmixer_pspd->override_in_ch_map = false;
 			}
+
 		}
 	}
 	mutex_unlock(&pdata->lock);
@@ -2059,7 +2091,7 @@ static int msm_pcm_playback_app_type_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 	u64 fe_id = kcontrol->private_value;
 	int session_type = SESSION_TYPE_RX;
 	int be_id = ucontrol->value.integer.value[3];
-	struct msm_pcm_stream_app_type_cfg cfg_data = {0, 0, 48000, 0};
+	struct msm_pcm_stream_app_type_cfg cfg_data = {0, 0, 48000, 0, 0};
 	int ret = 0;
 
 	cfg_data.app_type = ucontrol->value.integer.value[0];
@@ -2068,10 +2100,12 @@ static int msm_pcm_playback_app_type_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 		cfg_data.sample_rate = ucontrol->value.integer.value[2];
 	if (ucontrol->value.integer.value[4] != 0)
 		cfg_data.copp_token = ucontrol->value.integer.value[4];
-	pr_debug("%s: fe_id- %llu session_type- %d be_id- %d app_type- %d acdb_dev_id- %d sample_rate- %d copp_token %d\n",
-		__func__, fe_id, session_type, be_id,
-		cfg_data.app_type, cfg_data.acdb_dev_id, cfg_data.sample_rate,
-		cfg_data.copp_token);
+	if (ucontrol->value.integer.value[5] != 0)
+		cfg_data.bit_width = ucontrol->value.integer.value[5];
+	pr_debug("%s: fe_id- %llu session_type- %d be_id- %d app_type- %d acdb_dev_id- %d"
+		"sample_rate- %d copp_token- %d bit_width- %d\n",
+		__func__, fe_id, session_type, be_id, cfg_data.app_type, cfg_data.acdb_dev_id,
+		cfg_data.sample_rate, cfg_data.copp_token, cfg_data.bit_width);
 	ret = msm_pcm_routing_reg_stream_app_type_cfg(fe_id, session_type,
 						      be_id, &cfg_data);
 	if (ret < 0)
@@ -2103,10 +2137,11 @@ static int msm_pcm_playback_app_type_cfg_ctl_get(struct snd_kcontrol *kcontrol,
 	ucontrol->value.integer.value[2] = cfg_data.sample_rate;
 	ucontrol->value.integer.value[3] = be_id;
 	ucontrol->value.integer.value[4] = cfg_data.copp_token;
-	pr_debug("%s: fe_id- %llu session_type- %d be_id- %d app_type- %d acdb_dev_id- %d sample_rate- %d copp_token %d\n",
-		__func__, fe_id, session_type, be_id,
-		cfg_data.app_type, cfg_data.acdb_dev_id, cfg_data.sample_rate,
-		cfg_data.copp_token);
+	ucontrol->value.integer.value[5] = cfg_data.bit_width;
+	pr_debug("%s: fe_id- %llu session_type- %d be_id- %d app_type- %d acdb_dev_id- %d"
+		"sample_rate- %d copp_token- %d bit_width- %d\n",
+		__func__, fe_id, session_type, be_id, cfg_data.app_type, cfg_data.acdb_dev_id,
+		cfg_data.sample_rate, cfg_data.copp_token, cfg_data.bit_width);
 done:
 	return ret;
 }
@@ -2117,7 +2152,7 @@ static int msm_pcm_capture_app_type_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 	u64 fe_id = kcontrol->private_value;
 	int session_type = SESSION_TYPE_TX;
 	int be_id = ucontrol->value.integer.value[3];
-	struct msm_pcm_stream_app_type_cfg cfg_data = {0, 0, 48000, 0};
+	struct msm_pcm_stream_app_type_cfg cfg_data = {0, 0, 48000, 0, 0};
 	int ret = 0;
 
 	cfg_data.app_type = ucontrol->value.integer.value[0];
@@ -2126,10 +2161,12 @@ static int msm_pcm_capture_app_type_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 		cfg_data.sample_rate = ucontrol->value.integer.value[2];
 	if (ucontrol->value.integer.value[4] != 0)
 		cfg_data.copp_token = ucontrol->value.integer.value[4];
-	pr_debug("%s: fe_id- %llu session_type- %d be_id- %d app_type- %d acdb_dev_id- %d sample_rate- %d copp_token %d\n",
-		__func__, fe_id, session_type, be_id,
-		cfg_data.app_type, cfg_data.acdb_dev_id, cfg_data.sample_rate,
-		cfg_data.copp_token);
+	if (ucontrol->value.integer.value[5] != 0)
+		cfg_data.bit_width = ucontrol->value.integer.value[5];
+	pr_debug("%s: fe_id- %llu session_type- %d be_id- %d app_type- %d acdb_dev_id- %d"
+		"sample_rate- %d copp_token- %d bit_width- %d\n",
+		__func__, fe_id, session_type, be_id, cfg_data.app_type, cfg_data.acdb_dev_id,
+		cfg_data.sample_rate, cfg_data.copp_token, cfg_data.bit_width);
 	ret = msm_pcm_routing_reg_stream_app_type_cfg(fe_id, session_type,
 						      be_id, &cfg_data);
 	if (ret < 0)
@@ -2161,10 +2198,11 @@ static int msm_pcm_capture_app_type_cfg_ctl_get(struct snd_kcontrol *kcontrol,
 	ucontrol->value.integer.value[2] = cfg_data.sample_rate;
 	ucontrol->value.integer.value[3] = be_id;
 	ucontrol->value.integer.value[4] = cfg_data.copp_token;
-	pr_debug("%s: fe_id- %llu session_type- %d be_id- %d app_type- %d acdb_dev_id- %d sample_rate- %d copp_token %d\n",
-		__func__, fe_id, session_type, be_id,
-		cfg_data.app_type, cfg_data.acdb_dev_id, cfg_data.sample_rate,
-		cfg_data.copp_token);
+	ucontrol->value.integer.value[5] = cfg_data.bit_width;
+	pr_debug("%s: fe_id- %llu session_type- %d be_id- %d app_type- %d acdb_dev_id- %d"
+		"sample_rate- %d copp_token- %d bit_width- %d\n",
+		__func__, fe_id, session_type, be_id, cfg_data.app_type, cfg_data.acdb_dev_id,
+		cfg_data.sample_rate, cfg_data.copp_token, cfg_data.bit_width);
 done:
 	return ret;
 }
@@ -2264,6 +2302,7 @@ static int msm_pcm_channel_mixer_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 	struct snd_pcm *pcm = NULL;
 	struct snd_pcm_substream *substream = NULL;
 	struct msm_pcm_channel_mixer *chmixer_pspd = NULL;
+	struct msm_pcm_channel_map *chmap = NULL;
 	u8 asm_ch_map[PCM_FORMAT_MAX_NUM_CHANNEL_V8] = {0};
 	bool reset_override_out_ch_map = false;
 	bool reset_override_in_ch_map = false;
@@ -2314,15 +2353,28 @@ static int msm_pcm_channel_mixer_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 		return -EINVAL;
 	}
 	prtd = substream->runtime ? substream->runtime->private_data : NULL;
-	if (chmixer_pspd->enable && prtd) {
+	chmap = msm_pcm_get_chmap(fe_id, session_type);
+	if (!chmap) {
+		pr_err("%s: invalid chmap handle\n", __func__);
+		mutex_unlock(&pdata->lock);
+		return -EINVAL;
+	}
+
+	if (chmixer_pspd->enable) {
 		if (session_type == SESSION_TYPE_RX &&
 			!chmixer_pspd->override_in_ch_map) {
-			if (prtd->set_channel_map) {
+			if (chmap->set_channel_map) {
 				for (i = 0; i < PCM_FORMAT_MAX_NUM_CHANNEL_V8; i++)
-					chmixer_pspd->in_ch_map[i] = prtd->channel_map[i];
+					chmixer_pspd->in_ch_map[i] = chmap->channel_map[i];
 			} else {
-				q6asm_map_channels(asm_ch_map,
-					chmixer_pspd->input_channel, false);
+				ret = q6asm_map_channels(asm_ch_map,
+						chmixer_pspd->input_channel, false);
+				if (ret) {
+					pr_err("%s: unsupported chnum %d\n", __func__,
+					chmixer_pspd->input_channel);
+					mutex_unlock(&pdata->lock);
+					return -EINVAL;
+				}
 				for (i = 0; i < PCM_FORMAT_MAX_NUM_CHANNEL_V8; i++)
 					chmixer_pspd->in_ch_map[i] = asm_ch_map[i];
 			}
@@ -2330,14 +2382,21 @@ static int msm_pcm_channel_mixer_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 			reset_override_in_ch_map = true;
 		} else if (session_type == SESSION_TYPE_TX &&
 				!chmixer_pspd->override_out_ch_map) {
-			/*
-			 * Channel map set in prtd is for plyback only,
-			 * hence always use default for capture path.
-			 */
-			q6asm_map_channels(asm_ch_map,
-				chmixer_pspd->output_channel, false);
-			for (i = 0; i < PCM_FORMAT_MAX_NUM_CHANNEL_V8; i++)
-				chmixer_pspd->out_ch_map[i] = asm_ch_map[i];
+			if (chmap->set_channel_map) {
+				for (i = 0; i < PCM_FORMAT_MAX_NUM_CHANNEL_V8; i++)
+					chmixer_pspd->out_ch_map[i] = chmap->channel_map[i];
+			} else {
+				ret = q6asm_map_channels(asm_ch_map,
+						chmixer_pspd->output_channel, false);
+				if (ret) {
+					pr_err("%s: unsupported chnum %d\n", __func__,
+					chmixer_pspd->output_channel);
+					mutex_unlock(&pdata->lock);
+					return -EINVAL;
+				}
+				for (i = 0; i < PCM_FORMAT_MAX_NUM_CHANNEL_V8; i++)
+					chmixer_pspd->out_ch_map[i] = asm_ch_map[i];
+			}
 			chmixer_pspd->override_out_ch_map = true;
 			reset_override_out_ch_map = true;
 		}
