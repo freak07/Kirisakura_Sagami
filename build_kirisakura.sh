@@ -18,7 +18,7 @@ BASE_PATH=/home/miles/Android_Build/Clang_Google/linux-x86
 BASE_PATH_GCC=/home/miles/Android_Build/GCC_Google_Arm64
 BASE_PATH_GCC_32=/home/miles/Android_Build/GCC_Google_Arm32
 export DTC_EXT=/home/miles/Downloads/DU_Tools/dtc-aosp
-export CLANG_PATH=$BASE_PATH/clang-r428724/bin
+export CLANG_PATH=$BASE_PATH/clang-r445002/bin
 export PATH=${CLANG_PATH}:${PATH}
 
 export CLANG_TRIPLE=aarch64-linux-gnu-
