@@ -5,6 +5,7 @@
  * MSM PCIe endpoint core driver.
  */
 
+#include <dt-bindings/regulator/qcom,rpmh-regulator-levels.h>
 #include <linux/module.h>
 #include <linux/bitops.h>
 #include <linux/clk.h>
@@ -52,9 +53,10 @@ static u32 clkreq_irq;
 struct ep_pcie_dev_t ep_pcie_dev = {0};
 
 static struct ep_pcie_vreg_info_t ep_pcie_vreg_info[EP_PCIE_MAX_VREG] = {
-	{NULL, "vreg-1p8", 1200000, 1200000, 3000, true},
+	{NULL, "vreg-1p8", 1200000, 1200000, 30000, true},
 	{NULL, "vreg-0p9", 912000, 912000, 132000, true},
-	{NULL, "vreg-cx", 0, 0, 0, false}
+	{NULL, "vreg-cx", 0, 0, 0, false},
+	{NULL, "vreg-mx", 0, 0, 0, false}
 };
 
 static struct ep_pcie_gpio_info_t ep_pcie_gpio_info[EP_PCIE_MAX_GPIO] = {
@@ -112,6 +114,8 @@ static const struct ep_pcie_irq_info_t ep_pcie_irq_info[EP_PCIE_MAX_IRQ] = {
 	{"int_bme",	0},
 	{"int_global",	0},
 };
+
+static int ep_pcie_core_wakeup_host_internal(enum ep_pcie_event event);
 
 int ep_pcie_get_debug_mask(void)
 {
@@ -309,8 +313,15 @@ static int ep_pcie_vreg_init(struct ep_pcie_dev_t *dev)
 		while (i--) {
 			struct regulator *hdl = dev->vreg[i].hdl;
 
-			if (hdl)
+			if (hdl) {
 				regulator_disable(hdl);
+				if (!strcmp(dev->vreg[i].name, "vreg-mx")) {
+					EP_PCIE_DBG(dev, "PCIe V%d: Removing vote for %s.\n",
+						dev->rev, dev->vreg[i].name);
+					regulator_set_voltage(hdl, RPMH_REGULATOR_LEVEL_RETENTION,
+						RPMH_REGULATOR_LEVEL_MAX);
+				}
+			}
 		}
 
 	return rc;
@@ -327,6 +338,12 @@ static void ep_pcie_vreg_deinit(struct ep_pcie_dev_t *dev)
 			EP_PCIE_DBG(dev, "Vreg %s is being disabled\n",
 				dev->vreg[i].name);
 			regulator_disable(dev->vreg[i].hdl);
+			if (!strcmp(dev->vreg[i].name, "vreg-mx")) {
+				EP_PCIE_DBG(dev, "PCIe V%d: Removing vote for %s.\n",
+					 dev->rev, dev->vreg[i].name);
+				regulator_set_voltage(dev->vreg[i].hdl,
+					RPMH_REGULATOR_LEVEL_RETENTION, RPMH_REGULATOR_LEVEL_MAX);
+			}
 		}
 	}
 }
@@ -837,7 +854,7 @@ static void ep_pcie_core_init(struct ep_pcie_dev_t *dev, bool configured)
 	}
 
 	if (dev->active_config) {
-		ep_pcie_write_reg(dev->dm_core, PCIE20_AUX_CLK_FREQ_REG, 0x14);
+		ep_pcie_write_reg(dev->dm_core, PCIE20_AUX_CLK_FREQ_REG, dev->aux_clk_val);
 
 		/* Prevent L1ss wakeup after 100ms */
 		ep_pcie_write_mask(dev->dm_core + PCIE20_GEN3_RELATED_OFF,
@@ -1615,6 +1632,35 @@ disable_clkreq:
 }
 EXPORT_SYMBOL(ep_pcie_core_l1ss_sleep_config_enable);
 
+static void ep_pcie_core_toggle_wake_gpio(bool is_on)
+{
+	struct ep_pcie_dev_t *dev = &ep_pcie_dev;
+	u32 val = dev->gpio[EP_PCIE_GPIO_WAKE].on;
+
+	if (!is_on) {
+		val = !dev->gpio[EP_PCIE_GPIO_WAKE].on;
+		EP_PCIE_DBG(dev,
+			"PCIe V%d: deassert PCIe WAKE# after PERST# is deasserted\n",
+				dev->rev);
+	} else {
+		dev->wake_counter++;
+	}
+
+	/*
+	 * Toggle WAKE# GPIO until to prosed state
+	 */
+	gpio_set_value(dev->gpio[EP_PCIE_GPIO_WAKE].num, val);
+
+	EP_PCIE_DBG(dev,
+		"PCIe V%d: No. %ld to %sassert PCIe WAKE#; perst is %sasserted; D3hot is %s received, WAKE GPIO state:%d\n",
+		dev->rev, dev->wake_counter,
+			is_on ? "":"de-",
+			atomic_read(&dev->perst_deast) ? "de-" : "",
+			dev->l23_ready ? "" : "not",
+			gpio_get_value(dev->gpio[EP_PCIE_GPIO_WAKE].num));
+
+}
+
 int ep_pcie_core_enable_endpoint(enum ep_pcie_options opt)
 {
 	int ret = 0;
@@ -1773,18 +1819,8 @@ int ep_pcie_core_enable_endpoint(enum ep_pcie_options opt)
 		EP_PCIE_DBG(dev, "PCIe V%d: WAKE GPIO initial:%d\n",
 			dev->rev,
 			gpio_get_value(dev->gpio[EP_PCIE_GPIO_WAKE].num));
-		gpio_set_value(dev->gpio[EP_PCIE_GPIO_WAKE].num,
-				1 - dev->gpio[EP_PCIE_GPIO_WAKE].on);
-		EP_PCIE_DBG(dev,
-			"PCIe V%d: WAKE GPIO after deassertion:%d\n",
-			dev->rev,
-			gpio_get_value(dev->gpio[EP_PCIE_GPIO_WAKE].num));
-		gpio_set_value(dev->gpio[EP_PCIE_GPIO_WAKE].num,
-				dev->gpio[EP_PCIE_GPIO_WAKE].on);
-		EP_PCIE_DBG(dev,
-			"PCIe V%d: WAKE GPIO after assertion:%d\n",
-			dev->rev,
-			gpio_get_value(dev->gpio[EP_PCIE_GPIO_WAKE].num));
+		ep_pcie_core_toggle_wake_gpio(false);
+		ep_pcie_core_toggle_wake_gpio(true);
 	}
 
 	/* wait for host side to deassert PERST */
@@ -1805,16 +1841,11 @@ int ep_pcie_core_enable_endpoint(enum ep_pcie_options opt)
 			dev->rev);
 		ret = EP_PCIE_ERROR;
 		goto link_fail;
-	} else {
-		atomic_set(&dev->perst_deast, 1);
-		if (opt & EP_PCIE_OPT_AST_WAKE) {
-			/* deassert PCIe WAKE# */
-			EP_PCIE_DBG(dev,
-				"PCIe V%d: deassert PCIe WAKE# after PERST# is deasserted\n",
-				dev->rev);
-			gpio_set_value(dev->gpio[EP_PCIE_GPIO_WAKE].num,
-				1 - dev->gpio[EP_PCIE_GPIO_WAKE].on);
-		}
+	}
+	atomic_set(&dev->perst_deast, 1);
+	if (opt & EP_PCIE_OPT_AST_WAKE) {
+		/* deassert PCIe WAKE# */
+		ep_pcie_core_toggle_wake_gpio(false);
 	}
 
 	/* init PCIe PHY */
@@ -1907,11 +1938,10 @@ checkbme:
 	 * is triggered to send data from device to host at which point
 	 * it will assert WAKE#.
 	 */
-	gpio_set_value(dev->gpio[EP_PCIE_GPIO_WAKE].num,
-			1 - dev->gpio[EP_PCIE_GPIO_WAKE].on);
+	ep_pcie_core_toggle_wake_gpio(false);
 
 	if (dev->active_config)
-		ep_pcie_write_reg(dev->dm_core, PCIE20_AUX_CLK_FREQ_REG, 0x14);
+		ep_pcie_write_reg(dev->dm_core, PCIE20_AUX_CLK_FREQ_REG, dev->aux_clk_val);
 
 	if (!(opt & EP_PCIE_OPT_ENUM_ASYNC)) {
 		/* Wait for up to 1000ms for BME to be set */
@@ -2000,6 +2030,7 @@ int ep_pcie_core_disable_endpoint(void)
 		EP_PCIE_DBG(dev, "PCIe V%d: shut down the link\n",
 			dev->rev);
 	}
+	dev->conf_ipa_msi_iatu = false;
 
 	val =  readl_relaxed(dev->elbi + PCIE20_ELBI_SYS_STTS);
 	EP_PCIE_DBG(dev, "PCIe V%d: LTSSM_STATE during disable:0x%x\n",
@@ -2019,6 +2050,18 @@ int ep_pcie_core_disable_endpoint(void)
 			dev->rev, atomic_read(&dev->perst_deast),
 				atomic_read(&dev->ep_pcie_dev_wake));
 	}
+
+	/*
+	 * In some caes though device requested to do an inband PME
+	 * the host might still proceed with PERST assertion, below
+	 * code is to toggle WAKE in such sceanrios.
+	 */
+	if (atomic_read(&dev->host_wake_pending)) {
+		EP_PCIE_DBG(dev, "PCIe V%d: %s: wake pending, init wakeup\n",
+			dev->rev);
+		ep_pcie_core_wakeup_host_internal(EP_PCIE_EVENT_PM_D3_COLD);
+	}
+
 	spin_unlock_irqrestore(&dev->isr_lock, irqsave_flags);
 out:
 	mutex_unlock(&dev->setup_mtx);
@@ -2202,12 +2245,28 @@ static irqreturn_t ep_pcie_handle_dstate_change_irq(int irq, void *data)
 			EP_PCIE_DBG(dev,
 				"PCIe V%d: do not notify client about this D3 hot event since enumeration by HLOS is not done yet\n",
 				dev->rev);
+		if (atomic_read(&dev->host_wake_pending))
+			ep_pcie_core_wakeup_host_internal(
+				EP_PCIE_EVENT_PM_D3_HOT);
+
 	} else if (dstate == 0) {
 		dev->l23_ready = false;
 		dev->d0_counter++;
+		atomic_set(&dev->host_wake_pending, 0);
 		EP_PCIE_DBG(dev,
-			"PCIe V%d: No. %ld change to D0 state\n",
-			dev->rev, dev->d0_counter);
+			"PCIe V%d: No. %ld change to D0 state, clearing wake pending:%d\n",
+			dev->rev, dev->d0_counter,
+			atomic_read(&dev->host_wake_pending));
+		/*
+		 * During device bootup, there will not be any PERT-deassert,
+		 * so aquire wakelock from D0 event
+		 */
+		if (!atomic_read(&dev->ep_pcie_dev_wake)) {
+			pm_stay_awake(&dev->pdev->dev);
+			atomic_set(&dev->ep_pcie_dev_wake, 1);
+			EP_PCIE_DBG(dev, "PCIe V%d: Acquired wakelock in D0\n",
+				dev->rev);
+		}
 		ep_pcie_notify_event(dev, EP_PCIE_EVENT_PM_D0);
 	} else {
 		EP_PCIE_ERR(dev,
@@ -2319,9 +2378,22 @@ static irqreturn_t ep_pcie_handle_perst_irq(int irq, void *data)
 		EP_PCIE_DBG(dev,
 			"PCIe V%d: PCIe is not enumerated yet; PERST is %sasserted\n",
 			dev->rev, perst ? "de" : "");
+		atomic_set(&dev->perst_deast, perst ? 1 : 0);
 		if (perst) {
+			/*
+			 * Hold a wakelock to avoid delay during
+			 * link enablement in PCIE layer in non
+			 * enumerated scenario.
+			 */
+			if (!atomic_read(&dev->ep_pcie_dev_wake)) {
+				pm_stay_awake(&dev->pdev->dev);
+				atomic_set(&dev->ep_pcie_dev_wake, 1);
+				EP_PCIE_DBG(dev,
+					"PCIe V%d: Acquired wakelock\n",
+					dev->rev);
+			}
 			/* start work for link enumeration with the host side */
-			schedule_work(&dev->handle_perst_work);
+			queue_work(system_highpri_wq, &dev->handle_perst_work);
 		} else {
 			dev->no_notify = true;
 			/* shutdown the link if the link is already on */
@@ -2891,6 +2963,24 @@ int ep_pcie_core_get_msi_config(struct ep_pcie_msi_config *cfg)
 			ep_pcie_dev.msi_cfg.upper = upper;
 			ep_pcie_dev.msi_cfg.data = data;
 			ep_pcie_dev.msi_cfg.msg_num = cfg->msg_num;
+			ep_pcie_dev.conf_ipa_msi_iatu = false;
+		}
+		/*
+		 * All transactions originating from IPA have the RO
+		 * bit set by default. Setup another ATU region to clear
+		 * the RO bit for MSIs triggered via IPA DMA.
+		 */
+		if (ep_pcie_dev.active_config &&
+				!ep_pcie_dev.conf_ipa_msi_iatu) {
+			ep_pcie_config_outbound_iatu_entry(&ep_pcie_dev,
+				EP_PCIE_OATU_INDEX_IPA_MSI,
+				lower, 0,
+				(lower + resource_size(msi) - 1),
+				lower, upper);
+			ep_pcie_dev.conf_ipa_msi_iatu = true;
+			EP_PCIE_DBG(&ep_pcie_dev,
+				"PCIe V%d: Conf iATU for IPA MSI info: lower:0x%x; upper:0x%x\n",
+				ep_pcie_dev.rev, lower, upper);
 		}
 		return 0;
 	}
@@ -2974,10 +3064,7 @@ int ep_pcie_core_trigger_msi(u32 idx)
 static void ep_pcie_core_issue_inband_pme(void)
 {
 	struct ep_pcie_dev_t *dev = &ep_pcie_dev;
-	unsigned long irqsave_flags;
 	u32 pm_ctrl = 0;
-
-	spin_lock_irqsave(&dev->isr_lock, irqsave_flags);
 
 	EP_PCIE_DBG(dev,
 		"PCIe V%d: request to assert inband wake\n",
@@ -2991,35 +3078,44 @@ static void ep_pcie_core_issue_inband_pme(void)
 	EP_PCIE_DBG(dev,
 		"PCIe V%d: completed assert for inband wake\n",
 		dev->rev);
-
-	spin_unlock_irqrestore(&dev->isr_lock, irqsave_flags);
 }
-
-static int ep_pcie_core_wakeup_host(enum ep_pcie_event event)
+static int ep_pcie_core_wakeup_host_internal(enum ep_pcie_event event)
 {
 	struct ep_pcie_dev_t *dev = &ep_pcie_dev;
 
-	if (event == EP_PCIE_EVENT_PM_D3_HOT)
-		ep_pcie_core_issue_inband_pme();
-
-	if (atomic_read(&dev->perst_deast) && !dev->l23_ready) {
+	if (!atomic_read(&dev->perst_deast)) {
+		/*D3 cold handling*/
+		ep_pcie_core_toggle_wake_gpio(true);
+	} else if (dev->l23_ready) {
 		EP_PCIE_ERR(dev,
-			"PCIe V%d: request to assert WAKE# when PERST is de-asserted and D3hot is not received\n",
+			"PCIe V%d: request to assert WAKE# when in D3hot\n",
 			dev->rev);
-		return EP_PCIE_ERROR;
+		/*D3 hot handling*/
+		ep_pcie_core_issue_inband_pme();
+	} else {
+		/*D0 handling*/
+		EP_PCIE_ERR(dev,
+			"PCIe V%d: request to assert WAKE# when in D0\n",
+			dev->rev);
 	}
 
-	dev->wake_counter++;
+	atomic_set(&dev->host_wake_pending, 1);
 	EP_PCIE_DBG(dev,
-		"PCIe V%d: No. %ld to assert PCIe WAKE#; perst is %s de-asserted; D3hot is %s received\n",
-		dev->rev, dev->wake_counter,
+		"PCIe V%d: Set wake pending : %d and return ; perst is %s de-asserted; D3hot is %s set\n",
+		dev->rev, atomic_read(&dev->host_wake_pending),
 		atomic_read(&dev->perst_deast) ? "" : "not",
 		dev->l23_ready ? "" : "not");
-	/*
-	 * Assert WAKE# GPIO until link is back to L0.
-	 */
-	gpio_set_value(dev->gpio[EP_PCIE_GPIO_WAKE].num,
-			dev->gpio[EP_PCIE_GPIO_WAKE].on);
+	return 0;
+
+}
+static int ep_pcie_core_wakeup_host(enum ep_pcie_event event)
+{
+	unsigned long irqsave_flags;
+	struct ep_pcie_dev_t *dev = &ep_pcie_dev;
+
+	spin_lock_irqsave(&dev->isr_lock, irqsave_flags);
+	ep_pcie_core_wakeup_host_internal(event);
+	spin_unlock_irqrestore(&dev->isr_lock, irqsave_flags);
 	return 0;
 }
 
@@ -3229,6 +3325,18 @@ static int ep_pcie_probe(struct platform_device *pdev)
 		ep_pcie_dev.mhi_soc_reset_en = true;
 	}
 
+	ep_pcie_dev.aux_clk_val = 0x14;
+	ret = of_property_read_u32((&pdev->dev)->of_node, "qcom,aux-clk",
+					&ep_pcie_dev.aux_clk_val);
+	if (ret)
+		EP_PCIE_DBG(&ep_pcie_dev,
+			"PCIe V%d: Using default value 19.2 MHz.\n",
+				ep_pcie_dev.rev);
+	else
+		EP_PCIE_DBG(&ep_pcie_dev,
+			"PCIe V%d: Gen4 using aux_clk = 16.6 MHz\n",
+				ep_pcie_dev.rev);
+
 	memcpy(ep_pcie_dev.vreg, ep_pcie_vreg_info,
 				sizeof(ep_pcie_vreg_info));
 	memcpy(ep_pcie_dev.gpio, ep_pcie_gpio_info,
@@ -3334,11 +3442,44 @@ static const struct of_device_id ep_pcie_match[] = {
 	{}
 };
 
+static int ep_pcie_suspend_noirq(struct device *pdev)
+{
+	struct ep_pcie_dev_t *dev = &ep_pcie_dev;
+
+
+	/* Allow suspend if autonomous M2 is enabled  */
+	if (dev->m2_autonomous) {
+		EP_PCIE_DBG(dev,
+			"PCIe V%d: Autonomous M2 is enabled, allow suspend\n",
+			dev->rev);
+		return 0;
+	}
+
+	/* Allow suspend only after D3 cold is received */
+	if (atomic_read(&dev->perst_deast)) {
+		EP_PCIE_DBG(dev,
+			"PCIe V%d: Perst not asserted, fail suspend\n",
+			dev->rev);
+		return -EBUSY;
+	}
+
+	EP_PCIE_DBG(dev,
+		"PCIe V%d: Perst asserted, allow suspend\n",
+		dev->rev);
+
+	return 0;
+}
+
+static const struct dev_pm_ops ep_pcie_pm_ops = {
+	.suspend_noirq = ep_pcie_suspend_noirq,
+};
+
 static struct platform_driver ep_pcie_driver = {
 	.probe	= ep_pcie_probe,
 	.remove	= ep_pcie_remove,
 	.driver	= {
 		.name		= "pcie-ep",
+		.pm             = &ep_pcie_pm_ops,
 		.of_match_table	= ep_pcie_match,
 	},
 };

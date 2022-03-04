@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2002,2007-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2002,2007-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <asm/cacheflush.h>
@@ -1004,7 +1004,7 @@ static int kgsl_system_alloc_pages(u64 size, struct page ***pages,
 	struct page **local;
 	int i, npages = size >> PAGE_SHIFT;
 
-	local = kvcalloc(npages, sizeof(*pages), GFP_KERNEL | __GFP_NORETRY);
+	local = kvcalloc(npages, sizeof(*pages), GFP_KERNEL);
 	if (!local)
 		return -ENOMEM;
 
@@ -1297,6 +1297,7 @@ kgsl_allocate_secure_global(struct kgsl_device *device,
 	 * normally
 	 */
 	kgsl_mmu_map_global(device, &md->memdesc, 0);
+	kgsl_trace_gpu_mem_total(device, md->memdesc.size);
 
 	return &md->memdesc;
 }
@@ -1336,6 +1337,7 @@ struct kgsl_memdesc *kgsl_allocate_global(struct kgsl_device *device,
 	list_add_tail(&md->node, &device->globals);
 
 	kgsl_mmu_map_global(device, &md->memdesc, padding);
+	kgsl_trace_gpu_mem_total(device, md->memdesc.size);
 
 	return &md->memdesc;
 }

@@ -162,6 +162,7 @@ struct trusted_touch_vm_info {
 struct nvt_ts_data {
 	struct i2c_client *client;
 	struct input_dev *input_dev;
+	struct device *dev;
 	struct delayed_work nvt_fwu_work;
 	uint16_t addr;
 	int8_t phys[32];
@@ -197,10 +198,13 @@ struct nvt_ts_data {
 	struct mutex nvt_clk_io_ctrl_mutex;
 	const char *touch_environment;
 	struct completion trusted_touch_powerdown;
+	struct completion touch_suspend_resume;
 	struct clk *core_clk;
 	struct clk *iface_clk;
 	atomic_t trusted_touch_initialized;
 	atomic_t trusted_touch_enabled;
+	atomic_t trusted_touch_underway;
+	atomic_t suspend_resume_underway;
 	atomic_t trusted_touch_event;
 	atomic_t trusted_touch_abort_status;
 	atomic_t delayed_vm_probe_pending;

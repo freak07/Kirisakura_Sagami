@@ -285,11 +285,21 @@ bool a6xx_cx_regulator_disable_wait(struct regulator *reg,
 	ktime_t tout = ktime_add_us(ktime_get(), timeout * 1000);
 	unsigned int val;
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
 
 	if (IS_ERR_OR_NULL(reg))
 		return true;
 
 	regulator_disable(reg);
+
+	/*
+	 * Check logical enable state of CX GDSC using regulator_is_enabled()
+	 * instead of checking physical state by CX_GDSCR register because
+	 * in a640 and a680, CX_GDSCR will not be disabled from kernel. It can
+	 * be turned off by AOP for CX Power collapse.
+	 */
+	if (adreno_is_a640(adreno_dev) || adreno_is_a680(adreno_dev))
+		return !(regulator_is_enabled(gmu->cx_gdsc));
 
 	for (;;) {
 		if (adreno_is_a619_holi(adreno_dev))
@@ -562,16 +572,16 @@ void a6xx_start(struct adreno_device *adreno_dev)
 	kgsl_regwrite(device, A6XX_UCHE_WRITE_THRU_BASE_HI, 0x0001ffff);
 
 	/*
-	 * Some A6xx targets no longer use a programmed GMEM base address
-	 * so only write the registers if a non zero address is given
-	 * in the GPU list
+	 * Some A6xx targets no longer use a programmed UCHE GMEM base
+	 * address so only write the registers if this address is
+	 * non zero.
 	 */
-	if (adreno_dev->gpucore->gmem_base) {
+	if (adreno_dev->uche_gmem_base) {
 		kgsl_regwrite(device, A6XX_UCHE_GMEM_RANGE_MIN_LO,
-				adreno_dev->gpucore->gmem_base);
+				adreno_dev->uche_gmem_base);
 		kgsl_regwrite(device, A6XX_UCHE_GMEM_RANGE_MIN_HI, 0x0);
 		kgsl_regwrite(device, A6XX_UCHE_GMEM_RANGE_MAX_LO,
-				adreno_dev->gpucore->gmem_base +
+				adreno_dev->uche_gmem_base +
 				adreno_dev->gpucore->gmem_size - 1);
 		kgsl_regwrite(device, A6XX_UCHE_GMEM_RANGE_MAX_HI, 0x0);
 	}
@@ -651,6 +661,13 @@ void a6xx_start(struct adreno_device *adreno_dev)
 	default:
 		break;
 	}
+
+	/*
+	 * For macrotiling change on a680,  will affect RB, SP and TP
+	 * 0 means UBWC 3.0, 1 means UBWC 3.1
+	 */
+	if (adreno_is_a680(adreno_dev))
+		kgsl_regwrite(device, A6XX_RBBM_NC_MODE_CNTL, 1);
 
 	if (!WARN_ON(!adreno_dev->highest_bank_bit)) {
 		hbb_lo = (adreno_dev->highest_bank_bit - 13) & 3;
@@ -1250,9 +1267,8 @@ bool a6xx_hw_isidle(struct adreno_device *adreno_dev)
 	}
 
 	gmu_core_regread(device, A6XX_GPU_GMU_AO_GPU_CX_BUSY_STATUS, &reg);
-
 	/* Bit 23 is GPUBUSYIGNAHB */
-	return (reg & BIT(23)) ? false : true;
+	return ((reg & BIT(23)) || adreno_irq_pending(adreno_dev)) ? false : true;
 }
 
 int a6xx_microcode_read(struct adreno_device *adreno_dev)
@@ -2398,6 +2414,8 @@ static unsigned int a6xx_register_offsets[ADRENO_REG_REGISTER_MAX] = {
 				A6XX_GMU_AHB_FENCE_STATUS),
 	ADRENO_REG_DEFINE(ADRENO_REG_GMU_GMU2HOST_INTR_MASK,
 				A6XX_GMU_GMU2HOST_INTR_MASK),
+	ADRENO_REG_DEFINE(ADRENO_REG_GMU_AO_RBBM_INT_UNMASKED_STATUS,
+				A6XX_GMU_RBBM_INT_UNMASKED_STATUS),
 };
 
 static int cpu_gpu_lock(struct cpu_gpu_lock *lock)

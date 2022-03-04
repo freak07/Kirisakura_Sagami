@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/iopoll.h>
@@ -294,7 +294,7 @@ static const unsigned int a6xx_registers[] = {
 	0xA600, 0xA601, 0xA603, 0xA603, 0xA60A, 0xA60A, 0xA610, 0xA617,
 	0xA630, 0xA630,
 	/* HLSQ */
-	0xD002, 0xD004,
+	0xD002, 0xD003,
 };
 
 static const unsigned int a660_registers[] = {
@@ -1591,7 +1591,8 @@ static void _a6xx_do_crashdump(struct kgsl_device *device)
 
 	timeout = ktime_add_ms(ktime_get(), CP_CRASH_DUMPER_TIMEOUT);
 
-	might_sleep();
+	if (!device->snapshot_atomic)
+		might_sleep();
 
 	for (;;) {
 		/* make sure we're reading the latest value */
@@ -1603,7 +1604,8 @@ static void _a6xx_do_crashdump(struct kgsl_device *device)
 			break;
 
 		/* Wait 1msec to avoid unnecessary looping */
-		usleep_range(100, 1000);
+		if (!device->snapshot_atomic)
+			usleep_range(100, 1000);
 	}
 
 	kgsl_regread(device, A6XX_CP_CRASH_DUMP_STATUS, &val);

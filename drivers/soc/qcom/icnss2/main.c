@@ -84,7 +84,8 @@ uint64_t dynamic_feature_mask = ICNSS_DEFAULT_FEATURE_MASK;
 #define ICNSS_EVENT_UNINTERRUPTIBLE		BIT(1)
 #define ICNSS_EVENT_SYNC_UNINTERRUPTIBLE	(ICNSS_EVENT_UNINTERRUPTIBLE | \
 						 ICNSS_EVENT_SYNC)
-
+#define ICNSS_DMS_QMI_CONNECTION_WAIT_MS 50
+#define ICNSS_DMS_QMI_CONNECTION_WAIT_RETRY 200
 
 enum icnss_pdr_cause_index {
 	ICNSS_FW_CRASH,
@@ -540,6 +541,42 @@ int icnss_call_driver_uevent(struct icnss_priv *priv,
 	return priv->ops->uevent(&priv->pdev->dev, &uevent_data);
 }
 
+static int icnss_setup_dms_mac(struct icnss_priv *priv)
+{
+	int i;
+	int ret = 0;
+
+	ret = icnss_qmi_get_dms_mac(priv);
+	if (ret == 0 && priv->dms.mac_valid)
+		goto qmi_send;
+
+	/* DTSI property use-nv-mac is used to force DMS MAC address for WLAN.
+	 * Thus assert on failure to get MAC from DMS even after retries
+	 */
+	if (priv->use_nv_mac) {
+		for (i = 0; i < ICNSS_DMS_QMI_CONNECTION_WAIT_RETRY; i++) {
+			if (priv->dms.mac_valid)
+				break;
+
+			ret = icnss_qmi_get_dms_mac(priv);
+			if (ret != -EAGAIN)
+				break;
+			msleep(ICNSS_DMS_QMI_CONNECTION_WAIT_MS);
+		}
+		if (!priv->dms.nv_mac_not_prov && !priv->dms.mac_valid) {
+			icnss_pr_err("Unable to get MAC from DMS after retries\n");
+			ICNSS_ASSERT(0);
+			return -EINVAL;
+		}
+	}
+qmi_send:
+	if (priv->dms.mac_valid)
+		ret =
+		icnss_wlfw_wlan_mac_req_send_sync(priv, priv->dms.mac,
+						  ARRAY_SIZE(priv->dms.mac));
+	return ret;
+}
+
 static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 						 void *data)
 {
@@ -555,7 +592,7 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 
 	icnss_ignore_fw_timeout(false);
 
-	if (test_bit(ICNSS_WLFW_CONNECTED, &penv->state)) {
+	if (test_bit(ICNSS_WLFW_CONNECTED, &priv->state)) {
 		icnss_pr_err("QMI Server already in Connected State\n");
 		ICNSS_ASSERT(0);
 	}
@@ -573,44 +610,44 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 			goto qmi_registered;
 		}
 		ignore_assert = true;
-		goto clear_server;
+		goto fail;
 	}
 
 	if (priv->device_id == WCN6750_DEVICE_ID) {
 		ret = wlfw_host_cap_send_sync(priv);
 		if (ret < 0)
-			goto clear_server;
+			goto fail;
 	}
 
 	if (priv->device_id == ADRASTEA_DEVICE_ID) {
 		if (!priv->msa_va) {
 			icnss_pr_err("Invalid MSA address\n");
 			ret = -EINVAL;
-			goto clear_server;
+			goto fail;
 		}
 
 		ret = wlfw_msa_mem_info_send_sync_msg(priv);
 		if (ret < 0) {
 			ignore_assert = true;
-			goto clear_server;
+			goto fail;
 		}
 
 		ret = wlfw_msa_ready_send_sync_msg(priv);
 		if (ret < 0) {
 			ignore_assert = true;
-			goto clear_server;
+			goto fail;
 		}
 	}
 
 	ret = wlfw_cap_send_sync_msg(priv);
 	if (ret < 0) {
 		ignore_assert = true;
-		goto clear_server;
+		goto fail;
 	}
 
 	ret = icnss_hw_power_on(priv);
 	if (ret)
-		goto clear_server;
+		goto fail;
 
 	if (priv->device_id == WCN6750_DEVICE_ID) {
 		ret = wlfw_device_info_send_msg(priv);
@@ -635,7 +672,6 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 
 		ret = icnss_wlfw_bdf_dnld_send_sync(priv,
 						    priv->ctrl_params.bdf_type);
-
 	}
 
 	if (priv->device_id == ADRASTEA_DEVICE_ID) {
@@ -656,8 +692,6 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 
 device_info_failure:
 	icnss_hw_power_off(priv);
-clear_server:
-	icnss_clear_server(priv);
 fail:
 	ICNSS_ASSERT(ignore_assert);
 qmi_registered:
@@ -806,6 +840,9 @@ static int icnss_driver_event_fw_ready_ind(struct icnss_priv *priv, void *data)
 	set_bit(ICNSS_FW_READY, &priv->state);
 	clear_bit(ICNSS_MODE_ON, &priv->state);
 
+	if (priv->device_id == WCN6750_DEVICE_ID)
+		icnss_free_qdss_mem(priv);
+
 	icnss_pr_info("WLAN FW is ready: 0x%lx\n", priv->state);
 
 	icnss_hw_power_off(priv);
@@ -816,10 +853,13 @@ static int icnss_driver_event_fw_ready_ind(struct icnss_priv *priv, void *data)
 		goto out;
 	}
 
-	if (test_bit(ICNSS_PD_RESTART, &priv->state))
+	if (test_bit(ICNSS_PD_RESTART, &priv->state)) {
 		ret = icnss_pd_restart_complete(priv);
-	else
+	} else {
+		if (priv->device_id == WCN6750_DEVICE_ID)
+			icnss_setup_dms_mac(priv);
 		ret = icnss_call_driver_probe(priv);
+	}
 
 	icnss_vreg_unvote(priv);
 
@@ -2123,9 +2163,9 @@ static int icnss_trigger_ssr_smp2p(struct icnss_priv *priv)
 			ICNSS_SMEM_VALUE_MASK,
 			value);
 	if (ret)
-		icnss_pr_dbg("Error in SMP2P sent ret: %d\n", ret);
+		icnss_pr_vdbg1("Error in SMP2P sent ret: %d\n", ret);
 
-	icnss_pr_dbg("Initiate Root PD restart. SMP2P sent value: 0x%X\n",
+	icnss_pr_vdbg1("Initiate Root PD restart. SMP2P sent value: 0x%X\n",
 		     value);
 	set_bit(ICNSS_HOST_TRIGGERED_PDR, &priv->state);
 	return ret;
@@ -2785,6 +2825,10 @@ int icnss_wlan_enable(struct device *dev, struct icnss_wlan_enable_cfg *config,
 		return -EINVAL;
 	}
 
+	if (priv->device_id == WCN6750_DEVICE_ID &&
+	    !priv->dms.nv_mac_not_prov && !priv->dms.mac_valid)
+		icnss_setup_dms_mac(priv);
+
 	return icnss_send_wlan_enable_to_fw(priv, config, mode, host_version);
 }
 EXPORT_SYMBOL(icnss_wlan_enable);
@@ -2859,6 +2903,8 @@ int icnss_smmu_map(struct device *dev,
 		   phys_addr_t paddr, uint32_t *iova_addr, size_t size)
 {
 	struct icnss_priv *priv = dev_get_drvdata(dev);
+	int flag = IOMMU_READ | IOMMU_WRITE;
+	bool dma_coherent = false;
 	unsigned long iova;
 	int prop_len = 0;
 	size_t len;
@@ -2888,11 +2934,17 @@ int icnss_smmu_map(struct device *dev,
 		return -ENOMEM;
 	}
 
+	dma_coherent = of_property_read_bool(dev->of_node, "dma-coherent");
+	icnss_pr_dbg("dma-coherent is %s\n",
+		     dma_coherent ? "enabled" : "disabled");
+	if (dma_coherent)
+		flag |= IOMMU_CACHE;
+
 	icnss_pr_dbg("IOMMU Map: iova %lx, len %zu\n", iova, len);
 
 	ret = iommu_map(priv->iommu_domain, iova,
 			rounddown(paddr, PAGE_SIZE), len,
-			IOMMU_READ | IOMMU_WRITE);
+			flag);
 	if (ret) {
 		icnss_pr_err("PA to IOVA mapping failed, ret %d\n", ret);
 		return ret;
@@ -3055,7 +3107,7 @@ int icnss_exit_power_save(struct device *dev)
 	unsigned int value = 0;
 	int ret;
 
-	icnss_pr_dbg("Calling Exit Power Save\n");
+	icnss_pr_vdbg1("Calling Exit Power Save\n");
 
 	if (test_bit(ICNSS_PD_RESTART, &priv->state) ||
 	    !test_bit(ICNSS_MODE_ON, &priv->state))
@@ -3069,9 +3121,9 @@ int icnss_exit_power_save(struct device *dev)
 			ICNSS_SMEM_VALUE_MASK,
 			value);
 	if (ret)
-		icnss_pr_dbg("Error in SMP2P sent ret: %d\n", ret);
+		icnss_pr_vdbg1("Error in SMP2P sent ret: %d\n", ret);
 
-	icnss_pr_dbg("SMP2P sent value: 0x%X\n", value);
+	icnss_pr_vdbg1("SMP2P sent value: 0x%X\n", value);
 	return ret;
 }
 EXPORT_SYMBOL(icnss_exit_power_save);
@@ -3521,6 +3573,32 @@ out:
 	return ret;
 }
 
+static int icnss_smmu_fault_handler(struct iommu_domain *domain,
+				    struct device *dev, unsigned long iova,
+				    int flags, void *handler_token)
+{
+	struct icnss_priv *priv = handler_token;
+	struct icnss_uevent_fw_down_data fw_down_data = {0};
+
+	icnss_fatal_err("SMMU fault happened with IOVA 0x%lx\n", iova);
+
+	if (!priv) {
+		icnss_pr_err("priv is NULL\n");
+		return -ENODEV;
+	}
+
+	if (test_bit(ICNSS_FW_READY, &priv->state)) {
+		fw_down_data.crashed = true;
+		icnss_call_driver_uevent(priv, ICNSS_UEVENT_FW_DOWN,
+					 &fw_down_data);
+	}
+
+	icnss_trigger_recovery(&priv->pdev->dev);
+
+	/* IOMMU driver requires non-zero return value to print debug info. */
+	return -EINVAL;
+}
+
 static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 {
 	int ret = 0;
@@ -3552,6 +3630,10 @@ static int icnss_smmu_dt_parse(struct icnss_priv *priv)
 		if (!ret && !strcmp("fastmap", iommu_dma_type)) {
 			icnss_pr_dbg("SMMU S1 stage enabled\n");
 			priv->smmu_s1_enable = true;
+			if (priv->device_id == WCN6750_DEVICE_ID)
+				iommu_set_fault_handler(priv->iommu_domain,
+						icnss_smmu_fault_handler,
+						priv);
 		}
 
 		res = platform_get_resource_byname(pdev,
@@ -3655,7 +3737,7 @@ static inline void  icnss_get_smp2p_info(struct icnss_priv *priv)
 					    "wlan-smp2p-out",
 					    &priv->smp2p_info.smem_bit);
 	if (IS_ERR(priv->smp2p_info.smem_state)) {
-		icnss_pr_dbg("Failed to get smem state %d",
+		icnss_pr_vdbg1("Failed to get smem state %d",
 			     PTR_ERR(priv->smp2p_info.smem_state));
 	}
 
@@ -3674,6 +3756,12 @@ static inline void icnss_runtime_pm_deinit(struct icnss_priv *priv)
 	pm_runtime_disable(&priv->pdev->dev);
 	pm_runtime_allow(&priv->pdev->dev);
 	pm_runtime_put_sync(&priv->pdev->dev);
+}
+
+static inline bool icnss_use_nv_mac(struct icnss_priv *priv)
+{
+	return of_property_read_bool(priv->pdev->dev.of_node,
+				     "use-nv-mac");
 }
 
 static int icnss_probe(struct platform_device *pdev)
@@ -3777,6 +3865,9 @@ static int icnss_probe(struct platform_device *pdev)
 	init_completion(&priv->unblock_shutdown);
 
 	if (priv->device_id == WCN6750_DEVICE_ID) {
+		ret = icnss_dms_init(priv);
+		if (ret)
+			icnss_pr_err("ICNSS DMS init failed %d\n", ret);
 		ret = icnss_genl_init();
 		if (ret < 0)
 			icnss_pr_err("ICNSS genl init failed %d\n", ret);
@@ -3785,6 +3876,9 @@ static int icnss_probe(struct platform_device *pdev)
 		icnss_get_cpr_info(priv);
 		icnss_get_smp2p_info(priv);
 		set_bit(ICNSS_COLD_BOOT_CAL, &priv->state);
+		priv->use_nv_mac = icnss_use_nv_mac(priv);
+		icnss_pr_dbg("NV MAC feature is %s\n",
+			     priv->use_nv_mac ? "Mandatory":"Not Mandatory");
 		INIT_WORK(&wpss_loader, icnss_wpss_load);
 	}
 
@@ -3814,6 +3908,7 @@ static int icnss_remove(struct platform_device *pdev)
 	icnss_pr_info("Removing driver: state: 0x%lx\n", priv->state);
 
 	if (priv->device_id == WCN6750_DEVICE_ID) {
+		icnss_dms_deinit(priv);
 		icnss_genl_exit();
 		icnss_runtime_pm_deinit(priv);
 	}
@@ -3895,10 +3990,10 @@ static int icnss_pm_suspend(struct device *dev)
 				ICNSS_SMEM_VALUE_MASK,
 				value);
 			if (ret)
-				icnss_pr_dbg("Error in SMP2P sent ret: %d\n",
+				icnss_pr_vdbg1("Error in SMP2P sent ret: %d\n",
 					     ret);
 
-			icnss_pr_dbg("SMP2P sent value: 0x%X\n", value);
+			icnss_pr_vdbg1("SMP2P sent value: 0x%X\n", value);
 		}
 		priv->stats.pm_suspend++;
 		set_bit(ICNSS_PM_SUSPEND, &priv->state);
@@ -4033,9 +4128,9 @@ static int icnss_pm_runtime_suspend(struct device *dev)
 				ICNSS_SMEM_VALUE_MASK,
 				value);
 		if (ret)
-			icnss_pr_dbg("Error in SMP2P sent ret: %d\n", ret);
+			icnss_pr_vdbg1("Error in SMP2P sent ret: %d\n", ret);
 
-		icnss_pr_dbg("SMP2P sent value: 0x%X\n", value);
+		icnss_pr_vdbg1("SMP2P sent value: 0x%X\n", value);
 	}
 out:
 	return ret;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2013 - 2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013 - 2021, The Linux Foundation. All rights reserved.
  */
 
 #define pr_fmt(fmt) "rimps-memlat: " fmt
@@ -102,7 +102,8 @@ struct core_dev_map {
 struct cpu_pmu_ctrs {
 	uint32_t ccntr_lo;
 	uint32_t ccntr_hi;
-	uint32_t evcntr[MAX_EVCNTRS];
+	uint32_t evcntr[CONFIG_QTI_HW_NUM_PMU];
+	uint32_t amu_evcntr[CONFIG_QTI_HW_NUM_AMU * 2];
 	uint32_t valid;
 	uint32_t unused0;
 };
@@ -251,6 +252,9 @@ static ssize_t store_min_freq(struct kobject *kobj,
 	unsigned int min_freq;
 	unsigned int max_freq;
 
+	if (!ops)
+		return -ENODEV;
+
 	if (mon->mon_type == L3_MEMLAT) {
 		min_freq = l3_freqs[0];
 		max_freq = l3_freqs[l3_pstates];
@@ -289,6 +293,9 @@ static ssize_t store_max_freq(struct kobject *kobj,
 	struct scmi_memlat_vendor_ops *ops = cpu_grp->handle->memlat_ops;
 	unsigned int min_freq;
 	unsigned int max_freq;
+
+	if (!ops)
+		return -ENODEV;
 
 	if (mon->mon_type == L3_MEMLAT) {
 		min_freq = l3_freqs[0];
@@ -848,6 +855,8 @@ static int memlat_idle_notif(struct notifier_block *nb,
 			save_cpugrp_pmu_events(cpu_grp, cpu);
 			for (i = 0; i < cpu_grp->num_mons; i++) {
 				mon = &cpu_grp->mons[i];
+				if (!cpumask_test_cpu(cpu, &mon->cpus))
+					continue;
 				save_mon_pmu_events(mon, cpu);
 			}
 			set_pmu_cache_flag(PMU_CACHE_VALID, cpu);

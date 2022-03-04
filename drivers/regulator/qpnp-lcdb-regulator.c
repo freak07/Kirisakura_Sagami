@@ -99,6 +99,11 @@
 #define NFET_SW_SIZE_SHIFT		2
 #define PFET_SW_SIZE_MASK		GENMASK(1, 0)
 
+#define PM7325B_LCDB_P2_BLANK_TIMER_REG		0x54
+#define HIGH_P2_BLK_SEL_MASK		GENMASK(6, 4)
+#define HIGH_P2_BLK_SEL_SHIFT		4
+#define LOW_P2_BLK_SEL_MASK		GENMASK(2, 0)
+
 #define LCDB_BST_VREG_OK_CTL_REG	0x55
 #define BST_VREG_OK_DEB_MASK		GENMASK(1, 0)
 
@@ -129,6 +134,12 @@
 #define EN_TOUCH_WAKE_BIT		BIT(3)
 #define DIS_SCP_BIT			BIT(0)
 
+#define PM7325B_LCDB_MPC_CTL_REG		0x60
+#define MPC_NCP_SD_SEL_MASK		GENMASK(2, 0)
+#define MPC_CURRENT_MIN		160
+#define MPC_CURRENT_MAX		440
+#define MPC_CURRENT_STEP		40
+
 #define LCDB_PFM_CTL_REG		0x62
 #define EN_PFM_BIT			BIT(7)
 #define BYP_BST_SOFT_START_COMP_BIT	BIT(0)
@@ -146,11 +157,6 @@
 #define LCDB_LDO_OUTPUT_VOLTAGE_REG	0x71
 #define SET_OUTPUT_VOLTAGE_MASK		GENMASK(4, 0)
 #define PM7325B_SET_OUTPUT_VOLTAGE_MASK	GENMASK(5, 0)
-
-#define LCDB_LDO_TRAN_CTL_REG	0x72
-#define EN_LDO_TRAN_DET_BIT		BIT(7)
-#define CLR_LDO_UV_TIME_US	0x4
-#define CLR_LDO_UV_TIME_US_SHIFT	4
 
 #define LCDB_LDO_VREG_OK_CTL_REG	0x75
 #define VREG_OK_DEB_MASK		GENMASK(1, 0)
@@ -283,6 +289,9 @@ struct qpnp_lcdb {
 	int				min_voltage_mv;
 	int				max_voltage_mv;
 	int				pwrup_config;
+	int				high_p2_blk_ns;
+	int				low_p2_blk_ns;
+	int				mpc_current_thr_ma;
 	bool			ncp_symmetry;
 
 	/* TTW params */
@@ -364,7 +373,6 @@ enum lcdb_settings_index {
 enum lcdb_wa_flags {
 	NCP_SCP_DISABLE_WA = BIT(0),
 	FORCE_PD_ENABLE_WA = BIT(1),
-	LDO_UNDERSHOOT_WA = BIT(2),
 };
 
 static const u32 soft_start_us[] = {
@@ -425,6 +433,17 @@ static const u32 pm7325b_ldo_ilim_ma[] = {
 	595,
 	700,
 	840,
+};
+
+static const u32 pm7325b_p2_blk_ns[] = {
+	40,
+	69,
+	99,
+	129,
+	159,
+	189,
+	220,
+	250,
 };
 
 #define SETTING(_id, _sec_access, _valid)	\
@@ -1014,16 +1033,6 @@ static int qpnp_lcdb_enable(struct qpnp_lcdb *lcdb)
 		return 0;
 	}
 
-	if (lcdb->wa_flags & LDO_UNDERSHOOT_WA) {
-		/* Workaround to fix LCDB out of regulation issue */
-		val = CLR_LDO_UV_TIME_US << CLR_LDO_UV_TIME_US_SHIFT;
-		val |= EN_LDO_TRAN_DET_BIT;
-		rc = qpnp_lcdb_write(lcdb, lcdb->base + LCDB_LDO_TRAN_CTL_REG,
-					&val, 1);
-		if (rc < 0)
-			return rc;
-	}
-
 	if (lcdb->ttw_enable) {
 		rc = qpnp_lcdb_ttw_exit(lcdb);
 		if (rc < 0) {
@@ -1118,15 +1127,6 @@ static int qpnp_lcdb_disable(struct qpnp_lcdb *lcdb)
 
 	if (!lcdb->lcdb_enabled)
 		return 0;
-
-	if (lcdb->wa_flags & LDO_UNDERSHOOT_WA) {
-		/* Workaround to fix LCDB out of regulation issue */
-		val = CLR_LDO_UV_TIME_US << CLR_LDO_UV_TIME_US_SHIFT;
-		rc = qpnp_lcdb_write(lcdb, lcdb->base + LCDB_LDO_TRAN_CTL_REG,
-					&val, 1);
-		if (rc < 0)
-			return rc;
-	}
 
 	if (lcdb->ttw_enable) {
 		switch (lcdb->subtype) {
@@ -2409,9 +2409,6 @@ static int qpnp_lcdb_init_bst(struct qpnp_lcdb *lcdb)
 
 static void qpnp_lcdb_pmic_config(struct qpnp_lcdb *lcdb)
 {
-	int rc;
-	u8 val[2];
-
 	switch (lcdb->subtype) {
 	case PMI632:
 	case PM6150L:
@@ -2420,15 +2417,6 @@ static void qpnp_lcdb_pmic_config(struct qpnp_lcdb *lcdb)
 		break;
 	default:
 		break;
-	}
-
-	if (lcdb->subtype == PM7325B) {
-		rc = qpnp_lcdb_read(lcdb, lcdb->base + LCDB_REVISION3_REG,
-								val, 2);
-
-		/* This SW W/A is applicable for PM7325B 1.0 HW only */
-		if (!rc && val[0] == 0 && val[1] == 1)
-			lcdb->wa_flags |= LDO_UNDERSHOOT_WA;
 	}
 
 	pr_debug("LCDB wa_flags = 0x%2x\n", lcdb->wa_flags);
@@ -2464,6 +2452,33 @@ static int qpnp_lcdb_hw_init(struct qpnp_lcdb *lcdb)
 					    LCDB_CONFIG_SEL_REG,
 					    PWRUP_CONFIG_SEL_MASK,
 					    lcdb->pwrup_config);
+		if (rc < 0)
+			return rc;
+	}
+
+	if (lcdb->high_p2_blk_ns != -EINVAL) {
+		rc = qpnp_lcdb_masked_write(lcdb, lcdb->base +
+					    PM7325B_LCDB_P2_BLANK_TIMER_REG,
+					    HIGH_P2_BLK_SEL_MASK,
+					    lcdb->high_p2_blk_ns << HIGH_P2_BLK_SEL_SHIFT);
+		if (rc < 0)
+			return rc;
+	}
+
+	if (lcdb->low_p2_blk_ns != -EINVAL) {
+		rc = qpnp_lcdb_masked_write(lcdb, lcdb->base +
+					    PM7325B_LCDB_P2_BLANK_TIMER_REG,
+					    LOW_P2_BLK_SEL_MASK,
+					    lcdb->low_p2_blk_ns);
+		if (rc < 0)
+			return rc;
+	}
+
+	if (lcdb->mpc_current_thr_ma != -EINVAL) {
+		rc = qpnp_lcdb_masked_write(lcdb, lcdb->base +
+					    PM7325B_LCDB_MPC_CTL_REG,
+					    MPC_NCP_SD_SEL_MASK,
+					    lcdb->mpc_current_thr_ma);
 		if (rc < 0)
 			return rc;
 	}
@@ -2551,6 +2566,39 @@ static int qpnp_lcdb_pwrup_dn_delay(int val, int *delay)
 	return 0;
 }
 
+static int qpnp_lcdb_p2_blk_time(int val, int *time)
+{
+	int i;
+
+	if (!is_between(val, pm7325b_p2_blk_ns[0], pm7325b_p2_blk_ns[7])) {
+		pr_err("Invalid P2_BLK_TIME val %d (min=%d max=%d)\n",
+			val, pm7325b_p2_blk_ns[0], pm7325b_p2_blk_ns[7]);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(pm7325b_p2_blk_ns); i++) {
+		if (val == pm7325b_p2_blk_ns[i]) {
+			*time = i;
+			break;
+		}
+	}
+
+	return 0;
+}
+
+static int qpnp_lcdb_mpc_current(int val, int *cur)
+{
+	if (!is_between(val, MPC_CURRENT_MIN, MPC_CURRENT_MAX)) {
+		pr_err("Invalid MPC_CURRENT val %d (min=%d max=%d)\n",
+			val, MPC_CURRENT_MIN, MPC_CURRENT_MAX);
+		return -EINVAL;
+	}
+
+	*cur = (val - MPC_CURRENT_MIN) / MPC_CURRENT_STEP;
+
+	return 0;
+}
+
 static int qpnp_lcdb_parse_dt(struct qpnp_lcdb *lcdb)
 {
 	int rc = 0;
@@ -2606,6 +2654,9 @@ static int qpnp_lcdb_parse_dt(struct qpnp_lcdb *lcdb)
 	lcdb->pwrdn_delay_ms = -EINVAL;
 	lcdb->pwrup_delay_ms = -EINVAL;
 	lcdb->pwrup_config = -EINVAL;
+	lcdb->high_p2_blk_ns = -EINVAL;
+	lcdb->low_p2_blk_ns = -EINVAL;
+	lcdb->mpc_current_thr_ma = -EINVAL;
 	rc = of_property_read_u32(node, "qcom,pwrdn-delay-ms", &tmp);
 	if (!rc) {
 		rc = qpnp_lcdb_pwrup_dn_delay(tmp, &lcdb->pwrdn_delay_ms);
@@ -2625,6 +2676,27 @@ static int qpnp_lcdb_parse_dt(struct qpnp_lcdb *lcdb)
 		pr_err("Invalid pwrup config %d, max=%d\n",
 			lcdb->pwrup_config, PWRUP_CONFIG_MAX);
 		return -EINVAL;
+	}
+
+	rc = of_property_read_u32(node, "qcom,high-p2-blank-time-ns", &tmp);
+	if (!rc) {
+		rc = qpnp_lcdb_p2_blk_time(tmp, &lcdb->high_p2_blk_ns);
+		if (rc < 0)
+			return rc;
+	}
+
+	rc = of_property_read_u32(node, "qcom,low-p2-blank-time-ns", &tmp);
+	if (!rc) {
+		rc = qpnp_lcdb_p2_blk_time(tmp, &lcdb->low_p2_blk_ns);
+		if (rc < 0)
+			return rc;
+	}
+
+	rc = of_property_read_u32(node, "qcom,mpc-current-thr-ma", &tmp);
+	if (!rc) {
+		rc = qpnp_lcdb_mpc_current(tmp, &lcdb->mpc_current_thr_ma);
+		if (rc < 0)
+			return rc;
 	}
 
 	return 0;

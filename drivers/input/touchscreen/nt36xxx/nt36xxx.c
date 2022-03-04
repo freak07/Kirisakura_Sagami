@@ -725,6 +725,7 @@ static void nvt_ts_trusted_touch_abort_pvm(struct nvt_ts_data *ts)
 	case TRUSTED_TOUCH_PVM_INIT:
 	case PVM_I2C_RESOURCE_RELEASED:
 		atomic_set(&ts->trusted_touch_enabled, 0);
+		atomic_set(&ts->trusted_touch_underway, 0);
 	}
 
 	atomic_set(&ts->trusted_touch_abort_status, 0);
@@ -759,6 +760,9 @@ static void nvt_ts_clk_disable_unprepare(struct nvt_ts_data *ts)
 static int nvt_ts_bus_get(struct nvt_ts_data *ts)
 {
 	int rc = 0;
+
+	if (atomic_read(&ts->suspend_resume_underway))
+		wait_for_completion_interruptible(&ts->touch_suspend_resume);
 
 	reinit_completion(&ts->trusted_touch_powerdown);
 	mutex_lock(&ts->nvt_clk_io_ctrl_mutex);
@@ -835,6 +839,7 @@ static void nvt_trusted_touch_pvm_vm_mode_disable(struct nvt_ts_data *ts)
 	nvt_ts_trusted_touch_set_pvm_driver_state(ts,
 						TRUSTED_TOUCH_PVM_INIT);
 	atomic_set(&ts->trusted_touch_enabled, 0);
+	atomic_set(&ts->trusted_touch_underway, 0);
 	pr_info("trusted touch disabled\n");
 	return;
 error:
@@ -973,6 +978,12 @@ static int nvt_ts_trusted_touch_pvm_vm_mode_enable(struct nvt_ts_data *ts)
 	int rc = 0;
 	struct trusted_touch_vm_info *vm_info = ts->vm_info;
 
+	atomic_set(&ts->trusted_touch_underway, 1);
+
+#if BOOT_UPDATE_FIRMWARE
+	if (nvt_fwu_wq)
+		cancel_delayed_work_sync(&ts->nvt_fwu_work);
+#endif
 	/* i2c session start and resource acquire */
 	if (nvt_ts_bus_get(ts) < 0) {
 		pr_err("nvt_ts_bus_get failed\n");
@@ -1166,6 +1177,7 @@ static void nvt_ts_trusted_touch_init(struct nvt_ts_data *ts)
 		return;
 
 	init_completion(&ts->trusted_touch_powerdown);
+	init_completion(&ts->touch_suspend_resume);
 
 	/* Get clocks */
 	ts->core_clk = devm_clk_get(ts->client->dev.parent,
@@ -1208,12 +1220,23 @@ static void nvt_irq_enable(bool enable)
 
 	if (enable) {
 		if (!ts->irq_enabled) {
+#ifdef CONFIG_NOVATEK_TRUSTED_TOUCH
+			/* trusted_touch_underway is set in LA only */
+			if (atomic_read(&ts->trusted_touch_underway))
+				enable_irq_wake(ts->client->irq);
+#else
 			enable_irq(ts->client->irq);
+#endif
 			ts->irq_enabled = true;
 		}
 	} else {
 		if (ts->irq_enabled) {
+#ifdef CONFIG_NOVATEK_TRUSTED_TOUCH
+			if (atomic_read(&ts->trusted_touch_underway))
+				disable_irq_wake(ts->client->irq);
+#else
 			disable_irq(ts->client->irq);
+#endif
 			ts->irq_enabled = false;
 		}
 	}
@@ -2597,6 +2620,7 @@ static int32_t nvt_ts_late_probe_sub(struct i2c_client *client,
 	ts->input_dev->name = NVT_TS_NAME;
 	ts->input_dev->phys = ts->phys;
 	ts->input_dev->id.bustype = BUS_I2C;
+	ts->input_dev->dev.parent = ts->dev;
 
 	//---register input device---
 	ret = input_register_device(ts->input_dev);
@@ -2811,6 +2835,7 @@ static int32_t nvt_ts_probe(struct i2c_client *client,
 	}
 
 	ts->client = client;
+	ts->dev = &client->dev;
 	i2c_set_clientdata(client, ts);
 
 	//---parse dts---
@@ -3023,9 +3048,12 @@ static int32_t nvt_ts_suspend(struct device *dev)
 	}
 
 #ifdef CONFIG_NOVATEK_TRUSTED_TOUCH
-	if (atomic_read(&ts->trusted_touch_enabled))
+	if (atomic_read(&ts->trusted_touch_underway))
 		wait_for_completion_interruptible(
 			&ts->trusted_touch_powerdown);
+
+	atomic_set(&ts->suspend_resume_underway, 1);
+	reinit_completion(&ts->touch_suspend_resume);
 #endif
 
 #if !WAKEUP_GESTURE
@@ -3079,7 +3107,10 @@ static int32_t nvt_ts_suspend(struct device *dev)
 	input_sync(ts->input_dev);
 
 	msleep(50);
-
+#ifdef CONFIG_NOVATEK_TRUSTED_TOUCH
+	complete(&ts->touch_suspend_resume);
+	atomic_set(&ts->suspend_resume_underway, 0);
+#endif
 	NVT_LOG("end\n");
 
 	return 0;
@@ -3102,10 +3133,13 @@ static int32_t nvt_ts_resume(struct device *dev)
 		return 0;
 	}
 
-#ifdef CONFIG_ST_TRUSTED_TOUCH
-	if (atomic_read(&ts->trusted_touch_enabled))
+#ifdef CONFIG_NOVATEK_TRUSTED_TOUCH
+	if (atomic_read(&ts->trusted_touch_underway))
 		wait_for_completion_interruptible(
 			&ts->trusted_touch_powerdown);
+
+	atomic_set(&ts->suspend_resume_underway, 1);
+	reinit_completion(&ts->touch_suspend_resume);
 #endif
 	mutex_lock(&ts->lock);
 
@@ -3136,6 +3170,10 @@ static int32_t nvt_ts_resume(struct device *dev)
 
 	mutex_unlock(&ts->lock);
 
+#ifdef CONFIG_NOVATEK_TRUSTED_TOUCH
+	complete(&ts->touch_suspend_resume);
+	atomic_set(&ts->suspend_resume_underway, 0);
+#endif
 	NVT_LOG("end\n");
 
 	return 0;
