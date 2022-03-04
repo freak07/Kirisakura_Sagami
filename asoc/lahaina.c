@@ -5128,6 +5128,11 @@ static void set_cps_config(struct snd_soc_pcm_runtime *rtd,
 		return;
 	}
 
+	if (!ch_mask) {
+		pr_err("%s: channel mask is 0\n", __func__);
+		return;
+	}
+
 	if (!pdata->get_wsa_dev_num) {
 		pr_err("%s: get_wsa_dev_num is NULL\n", __func__);
 		return;
@@ -6389,6 +6394,31 @@ static struct snd_soc_dai_link msm_common_misc_fe_dai_links[] = {
 		/* this dainlink has playback support */
 		.id = MSM_FRONTEND_DAI_MULTIMEDIA10,
 		SND_SOC_DAILINK_REG(multimedia10),
+	},
+	{/* hw:x,44 */
+		.name = "Secondary MI2S_TX Hostless",
+		.stream_name = "Secondary MI2S_TX Hostless Capture",
+		.dynamic = 1,
+		.dpcm_capture = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			SND_SOC_DPCM_TRIGGER_POST},
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		SND_SOC_DAILINK_REG(sec_mi2s_tx_hostless),
+	},
+	/* DISP PORT Hostless */
+	{/* hw:x,45 */
+		.name = "DISPLAY_PORT_RX_HOSTLESS",
+		.stream_name = "DISPLAY_PORT_RX_HOSTLESS",
+		.dynamic = 1,
+		.dpcm_playback = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			SND_SOC_DPCM_TRIGGER_POST},
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		SND_SOC_DAILINK_REG(display_port_hostless),
 	},
 };
 
