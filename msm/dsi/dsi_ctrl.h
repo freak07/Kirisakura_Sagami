@@ -579,6 +579,7 @@ int dsi_ctrl_cmd_transfer(struct dsi_ctrl *dsi_ctrl,
 			  const struct mipi_dsi_msg *msg,
 			  u32 *flags);
 
+void dsi_ctrl_clear_slave_broadcast(struct dsi_ctrl *dsi_ctrl);
 /**
  * dsi_ctrl_cmd_tx_trigger() - Trigger a deferred command.
  * @dsi_ctrl:              DSI controller handle.

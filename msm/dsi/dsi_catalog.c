@@ -54,6 +54,7 @@ static void dsi_catalog_cmn_init(struct dsi_ctrl_hw *ctrl,
 	ctrl->ops.clear_rdbk_register = dsi_ctrl_hw_cmn_clear_rdbk_reg;
 	ctrl->ops.ctrl_reset = dsi_ctrl_hw_cmn_ctrl_reset;
 	ctrl->ops.mask_error_intr = dsi_ctrl_hw_cmn_mask_error_intr;
+	ctrl->ops.clear_slave_broadcast = dsi_ctrl_hw_cmn_clear_slave_broadcast;
 	ctrl->ops.error_intr_ctrl = dsi_ctrl_hw_cmn_error_intr_ctrl;
 	ctrl->ops.get_error_mask = dsi_ctrl_hw_cmn_get_error_mask;
 	ctrl->ops.get_hw_version = dsi_ctrl_hw_cmn_get_hw_version;

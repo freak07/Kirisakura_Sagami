@@ -2101,7 +2101,7 @@ static int dp_debug_init_status(struct dp_debug_private *debug,
 		return rc;
 	}
 
-	file = debugfs_create_file("hdr", 0400, dir, debug, &hdr_fops);
+	file = debugfs_create_file("hdr", 0444, dir, debug, &hdr_fops);
 	if (IS_ERR_OR_NULL(file)) {
 		rc = PTR_ERR(file);
 		DP_ERR("[%s] debugfs hdr failed, rc=%d\n",
@@ -2109,7 +2109,7 @@ static int dp_debug_init_status(struct dp_debug_private *debug,
 		return rc;
 	}
 
-	file = debugfs_create_file("hdr_mst", 0400, dir, debug, &hdr_mst_fops);
+	file = debugfs_create_file("hdr_mst", 0444, dir, debug, &hdr_mst_fops);
 	if (IS_ERR_OR_NULL(file)) {
 		rc = PTR_ERR(file);
 		DP_ERR("[%s] debugfs hdr_mst failed, rc=%d\n",

@@ -794,7 +794,7 @@ struct dsi_ctrl_hw_ops {
 	 * @en:		  Bool for mask or unmask of the error
 	 */
 	void (*mask_error_intr)(struct dsi_ctrl_hw *ctrl, u32 idx, bool en);
-
+	void (*clear_slave_broadcast)(struct dsi_ctrl_hw *ctrl);
 	/**
 	 * error_intr_ctrl() - Mask/Unmask master DSI error interrupt
 	 * @ctrl:         Pointer to the controller host hardware.

@@ -754,6 +754,11 @@ void dsi_ctrl_hw_cmn_kickoff_command(struct dsi_ctrl_hw *ctrl,
 		DSI_W32(ctrl, DSI_CMD_MODE_DMA_SW_TRIGGER, 0x1);
 }
 
+void dsi_ctrl_hw_cmn_clear_slave_broadcast(struct dsi_ctrl_hw *ctrl)
+{
+	DSI_W32(ctrl, DSI_COMMAND_MODE_DMA_CTRL, 0x0);
+	SDE_EVT32(0x1111);
+}
 /**
  * kickoff_fifo_command() - transmits a command using FIFO in dsi
  *                          hardware.
