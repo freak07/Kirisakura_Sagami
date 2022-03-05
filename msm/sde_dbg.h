@@ -9,6 +9,7 @@
 #include <stdarg.h>
 #include <linux/debugfs.h>
 #include <linux/list.h>
+#include <soc/qcom/minidump.h>
 
 /* select an uncommon hex value for the limiter */
 #define SDE_EVTLOG_DATA_LIMITER	(0xC0DEBEEF)
@@ -35,12 +36,14 @@ enum sde_dbg_evtlog_flag {
 	SDE_EVTLOG_IRQ = BIT(1),
 	SDE_EVTLOG_VERBOSE = BIT(2),
 	SDE_EVTLOG_EXTERNAL = BIT(3),
+	SDE_EVTLOG_REGWRITE = BIT(4),
 	SDE_EVTLOG_ALWAYS = -1
 };
 
 enum sde_dbg_dump_flag {
 	SDE_DBG_DUMP_IN_LOG = BIT(0),
 	SDE_DBG_DUMP_IN_MEM = BIT(1),
+	SDE_DBG_DUMP_IN_LOG_LIMITED = BIT(2),
 };
 
 enum sde_dbg_dump_context {
@@ -155,11 +158,10 @@ struct sde_dbg_reglog {
 	u32 first;
 	u32 last;
 	u32 last_dump;
-	u32 curr;
+	atomic64_t curr;
 	u32 next;
 	u32 enable;
 	u32 enable_mask;
-	spinlock_t spin_lock;
 };
 
 extern struct sde_dbg_reglog *sde_dbg_base_reglog;
@@ -199,6 +201,13 @@ extern struct sde_dbg_reglog *sde_dbg_base_reglog;
  */
 #define SDE_EVT32_EXTERNAL(...) sde_evtlog_log(sde_dbg_base_evtlog, __func__, \
 		__LINE__, SDE_EVTLOG_EXTERNAL, ##__VA_ARGS__, \
+		SDE_EVTLOG_DATA_LIMITER)
+/**
+ * SDE_EVT32_REGWRITE - Write a list of 32bit values for register writes logging
+ * ... - variable arguments
+ */
+#define SDE_EVT32_REGWRITE(...) sde_evtlog_log(sde_dbg_base_evtlog, __func__, \
+		__LINE__, SDE_EVTLOG_REGWRITE, ##__VA_ARGS__, \
 		SDE_EVTLOG_DATA_LIMITER)
 
 /**
@@ -240,6 +249,8 @@ extern struct sde_dbg_reglog *sde_dbg_base_reglog;
  */
 #define SDE_DBG_CTRL(...) sde_dbg_ctrl(__func__, ##__VA_ARGS__, \
 		SDE_DBG_DUMP_DATA_LIMITER)
+
+u32 sde_mini_dump_add_region(const char *name, u32 size, void *virt_addr);
 
 /**
  * sde_evtlog_init - allocate a new event log object

@@ -111,6 +111,8 @@ struct sde_rm_requirements {
 	uint64_t top_ctrl;
 	const struct sde_rm_topology_def *topology;
 	struct sde_encoder_hw_resources hw_res;
+	u32 cwb_requested_disp_type;
+	u32 conn_lm_mask;
 };
 
 /**
@@ -125,13 +127,15 @@ struct sde_rm_requirements {
  * @enc_id:	Reservations are tracked by Encoder DRM object ID.
  *		CRTCs may be connected to multiple Encoders.
  *		An encoder or connector id identifies the display path.
- * @topology	DRM<->HW topology use case
+ * @topology:	DRM<->HW topology use case
+ * @pending:	True for pending rsvp-nxt, cleared when the rsvp is committed
  */
 struct sde_rm_rsvp {
 	struct list_head list;
 	uint32_t seq;
 	uint32_t enc_id;
 	enum sde_rm_topology_name topology;
+	bool pending;
 };
 
 /**
@@ -274,9 +278,9 @@ static void _sde_rm_print_rsvps(
 	SDE_DEBUG("%d\n", stage);
 
 	list_for_each_entry(rsvp, &rm->rsvps, list) {
-		SDE_DEBUG("%d rsvp[s%ue%u] topology %d\n", stage, rsvp->seq,
-				rsvp->enc_id, rsvp->topology);
-		SDE_EVT32(stage, rsvp->seq, rsvp->enc_id, rsvp->topology);
+		SDE_DEBUG("%d rsvp%s[s%ue%u] topology %d\n", stage, rsvp->pending ? "_nxt" : "",
+				rsvp->seq, rsvp->enc_id, rsvp->topology);
+		SDE_EVT32(stage, rsvp->seq, rsvp->enc_id, rsvp->topology, rsvp->pending);
 	}
 
 	for (type = 0; type < SDE_HW_BLK_MAX; type++) {
@@ -979,7 +983,8 @@ static bool _sde_rm_check_lm_and_get_connected_blks(
 		struct sde_rm_hw_blk **dspp,
 		struct sde_rm_hw_blk **ds,
 		struct sde_rm_hw_blk **pp,
-		struct sde_rm_hw_blk *primary_lm)
+		struct sde_rm_hw_blk *primary_lm,
+		u32 conn_lm_mask)
 {
 	const struct sde_lm_cfg *lm_cfg = to_sde_hw_mixer(lm->hw)->cap;
 	const struct sde_pingpong_cfg *pp_cfg;
@@ -1036,6 +1041,13 @@ static bool _sde_rm_check_lm_and_get_connected_blks(
 			SDE_DEBUG("fail: cwb supported lm not allocated\n");
 			return false;
 		}
+
+		if (lm_cfg->cwb_mask && RM_RQ_CWB(reqs) &&
+			!(BIT(ffs(conn_lm_mask) - 1) & lm_cfg->cwb_mask)) {
+			SDE_DEBUG("cwb mixer not compatible id:%d cwb_mask:0x%x lm_mask:0x%x\n",
+					lm_cfg->id, lm_cfg->cwb_mask, conn_lm_mask);
+			return false;
+		}
 	} else if ((!is_conn_primary && lm_primary_pref) ||
 			(!is_conn_secondary && lm_secondary_pref)) {
 		SDE_DEBUG(
@@ -1081,7 +1093,7 @@ static int _sde_rm_reserve_lms(
 	struct sde_rm_hw_blk *ds[MAX_BLOCKS];
 	struct sde_rm_hw_blk *pp[MAX_BLOCKS];
 	struct sde_rm_hw_iter iter_i, iter_j;
-	u32 lm_mask = 0;
+	u32 lm_mask = 0, conn_lm_mask = 0;
 	int lm_count = 0;
 	int i, rc = 0;
 
@@ -1089,6 +1101,9 @@ static int _sde_rm_reserve_lms(
 		SDE_DEBUG("invalid number of lm: %d\n", reqs->topology->num_lm);
 		return 0;
 	}
+
+	if (RM_RQ_CWB(reqs))
+		conn_lm_mask = reqs->conn_lm_mask;
 
 	/* Find a primary mixer */
 	sde_rm_init_hw_iter(&iter_i, 0, SDE_HW_BLK_LM);
@@ -1113,11 +1128,14 @@ static int _sde_rm_reserve_lms(
 		if (!_sde_rm_check_lm_and_get_connected_blks(
 				rm, rsvp, reqs, lm[lm_count],
 				&dspp[lm_count], &ds[lm_count],
-				&pp[lm_count], NULL))
+				&pp[lm_count], NULL, conn_lm_mask))
 			continue;
 
 		lm_mask |= (1 << iter_i.blk->id);
 		++lm_count;
+
+		if (RM_RQ_CWB(reqs))
+			conn_lm_mask = conn_lm_mask & ~BIT(ffs(conn_lm_mask) - 1);
 
 		/* Return if peer is not needed */
 		if (lm_count == reqs->topology->num_lm)
@@ -1138,7 +1156,7 @@ static int _sde_rm_reserve_lms(
 			if (!_sde_rm_check_lm_and_get_connected_blks(
 					rm, rsvp, reqs, iter_j.blk,
 					&dspp[lm_count], &ds[lm_count],
-					&pp[lm_count], iter_i.blk))
+					&pp[lm_count], iter_i.blk, conn_lm_mask))
 				continue;
 
 			SDE_DEBUG("blk id = %d, _lm_ids[%d] = %d\n",
@@ -1151,6 +1169,10 @@ static int _sde_rm_reserve_lms(
 
 			lm_mask |= (1 << iter_j.blk->id);
 			++lm_count;
+
+			if (RM_RQ_CWB(reqs))
+				conn_lm_mask = conn_lm_mask & ~BIT(ffs(conn_lm_mask) - 1);
+
 			break;
 		}
 
@@ -1225,7 +1247,8 @@ static int _sde_rm_reserve_ctls(
 	while (_sde_rm_get_hw_locked(rm, &iter)) {
 		const struct sde_hw_ctl *ctl = to_sde_hw_ctl(iter.blk->hw);
 		unsigned long features = ctl->caps->features;
-		bool has_split_display, has_ppsplit, primary_pref;
+		bool has_split_display, has_ppsplit, primary_pref, secondary_pref;
+		bool is_conn_primary, is_conn_secondary;
 
 		if (RESERVED_BY_OTHER(iter.blk, rsvp))
 			continue;
@@ -1233,6 +1256,11 @@ static int _sde_rm_reserve_ctls(
 		has_split_display = BIT(SDE_CTL_SPLIT_DISPLAY) & features;
 		has_ppsplit = BIT(SDE_CTL_PINGPONG_SPLIT) & features;
 		primary_pref = BIT(SDE_CTL_PRIMARY_PREF) & features;
+		secondary_pref = BIT(SDE_CTL_SECONDARY_PREF) & features;
+		is_conn_primary = (reqs->hw_res.display_type ==
+					SDE_CONNECTOR_PRIMARY) ? true : false;
+		is_conn_secondary = (reqs->hw_res.display_type ==
+					SDE_CONNECTOR_SECONDARY) ? true : false;
 
 		SDE_DEBUG("ctl %d caps 0x%lX\n", iter.blk->id, features);
 
@@ -1240,18 +1268,21 @@ static int _sde_rm_reserve_ctls(
 		 * bypass rest feature checks on finding CTL preferred
 		 * for primary displays.
 		 */
-		if (!primary_pref && !_ctl_ids) {
+		if (!primary_pref && !secondary_pref && !_ctl_ids) {
 			if (top->needs_split_display != has_split_display)
 				continue;
 
 			if (top->top_name == SDE_RM_TOPOLOGY_PPSPLIT &&
 					!has_ppsplit)
 				continue;
-		} else if (!(reqs->hw_res.display_type ==
-				SDE_CONNECTOR_PRIMARY && primary_pref) && !_ctl_ids) {
+
+			if (is_conn_primary || is_conn_secondary)
+				continue;
+		} else if (!((is_conn_primary && primary_pref) ||
+				(is_conn_secondary && secondary_pref)) && !_ctl_ids) {
 			SDE_DEBUG(
-				"display pref not met. display_type: %d primary_pref: %d\n",
-				reqs->hw_res.display_type, primary_pref);
+				"display pref not met. display_type: %d features: 0x%lX\n",
+				reqs->hw_res.display_type, features);
 			continue;
 		}
 
@@ -1825,6 +1856,7 @@ static int _sde_rm_make_next_rsvp(struct sde_rm *rm, struct drm_encoder *enc,
 	rsvp->seq = ++rm->rsvp_next_seq;
 	rsvp->enc_id = enc->base.id;
 	rsvp->topology = reqs->topology->top_name;
+	rsvp->pending = true;
 	list_add_tail(&rsvp->list, &rm->rsvps);
 
 	ret = _sde_rm_make_lm_rsvp(rm, rsvp, reqs, splash_display);
@@ -1993,6 +2025,26 @@ int sde_rm_cont_splash_res_init(struct msm_drm_private *priv,
 	return 0;
 }
 
+static struct drm_connector *_sde_rm_get_connector(
+		struct drm_encoder *enc)
+{
+	struct drm_connector *conn = NULL, *conn_search;
+	struct sde_connector *c_conn = NULL;
+	struct drm_connector_list_iter conn_iter;
+
+	drm_connector_list_iter_begin(enc->dev, &conn_iter);
+	drm_for_each_connector_iter(conn_search, &conn_iter) {
+		c_conn = to_sde_connector(conn_search);
+		if (c_conn->encoder == enc) {
+			conn = conn_search;
+			break;
+		}
+	}
+	drm_connector_list_iter_end(&conn_iter);
+
+	return conn;
+}
+
 static int _sde_rm_populate_requirements(
 		struct sde_rm *rm,
 		struct drm_encoder *enc,
@@ -2001,6 +2053,8 @@ static int _sde_rm_populate_requirements(
 		struct sde_rm_requirements *reqs)
 {
 	const struct drm_display_mode *mode = &crtc_state->mode;
+	struct drm_encoder *encoder_iter;
+	struct drm_connector *conn;
 	int i, num_lm;
 
 	reqs->top_ctrl = sde_connector_get_property(conn_state,
@@ -2029,7 +2083,7 @@ static int _sde_rm_populate_requirements(
 			reqs->top_ctrl |= BIT(SDE_RM_TOPCTL_DSPP);
 
 		if (!RM_RQ_DS(reqs) && rm->hw_mdp->caps->has_dest_scaler &&
-		    sde_encoder_is_primary_display(enc))
+		    (sde_encoder_get_display_type(enc) == SDE_CONNECTOR_PRIMARY))
 			reqs->top_ctrl |= BIT(SDE_RM_TOPCTL_DS);
 	}
 
@@ -2037,7 +2091,7 @@ static int _sde_rm_populate_requirements(
 	 * Set the requirement for LM which has CWB support if CWB is
 	 * found enabled.
 	 */
-	if (!RM_RQ_CWB(reqs) && sde_encoder_in_clone_mode(enc)) {
+	if (!RM_RQ_CWB(reqs) && sde_crtc_state_in_clone_mode(enc, crtc_state)) {
 		reqs->top_ctrl |= BIT(SDE_RM_TOPCTL_CWB);
 
 		/*
@@ -2051,7 +2105,7 @@ static int _sde_rm_populate_requirements(
 			&rm->topology_tbl[SDE_RM_TOPOLOGY_DUALPIPE_3DMERGE];
 
 		num_lm = sde_crtc_get_num_datapath(crtc_state->crtc,
-				conn_state->connector);
+				conn_state->connector, crtc_state);
 
 		if (num_lm == 1)
 			reqs->topology =
@@ -2063,8 +2117,22 @@ static int _sde_rm_populate_requirements(
 			reqs->topology->top_name, reqs->topology->num_ctl);
 	}
 
-	SDE_DEBUG("top_ctrl: 0x%llX num_h_tiles: %d\n", reqs->top_ctrl,
-			reqs->hw_res.display_num_of_h_tiles);
+	if (RM_RQ_CWB(reqs)) {
+		drm_for_each_encoder_mask(encoder_iter, enc->dev,
+					 crtc_state->encoder_mask) {
+			if (drm_encoder_mask(encoder_iter) == drm_encoder_mask(enc))
+				continue;
+
+			reqs->cwb_requested_disp_type = sde_encoder_get_display_type(encoder_iter);
+			conn = _sde_rm_get_connector(encoder_iter);
+			if (conn)
+				reqs->conn_lm_mask = to_sde_connector(conn)->lm_mask;
+			break;
+		}
+	}
+
+	SDE_DEBUG("top_ctrl: 0x%llX num_h_tiles: %d cwb_req_disp_type:%d\n", reqs->top_ctrl,
+			reqs->hw_res.display_num_of_h_tiles, reqs->cwb_requested_disp_type);
 	SDE_DEBUG("num_lm: %d num_ctl: %d topology: %d split_display: %d\n",
 			reqs->topology->num_lm, reqs->topology->num_ctl,
 			reqs->topology->top_name,
@@ -2076,9 +2144,8 @@ static int _sde_rm_populate_requirements(
 	return 0;
 }
 
-static struct sde_rm_rsvp *_sde_rm_get_rsvp(
-		struct sde_rm *rm,
-		struct drm_encoder *enc)
+static struct sde_rm_rsvp *_sde_rm_get_rsvp(struct sde_rm *rm,
+		 struct drm_encoder *enc, bool nxt)
 {
 	struct sde_rm_rsvp *i;
 
@@ -2091,50 +2158,22 @@ static struct sde_rm_rsvp *_sde_rm_get_rsvp(
 		return NULL;
 
 	list_for_each_entry(i, &rm->rsvps, list)
-		if (i->enc_id == enc->base.id)
+		if (i->pending == nxt && i->enc_id == enc->base.id)
 			return i;
 
 	return NULL;
 }
 
-static struct sde_rm_rsvp *_sde_rm_get_rsvp_nxt(
-		struct sde_rm *rm,
+static struct sde_rm_rsvp *_sde_rm_get_rsvp_nxt(struct sde_rm *rm,
 		struct drm_encoder *enc)
 {
-	struct sde_rm_rsvp *i;
-
-	if (list_empty(&rm->rsvps))
-		return NULL;
-
-	list_for_each_entry(i, &rm->rsvps, list)
-		if (i->enc_id == enc->base.id)
-			break;
-
-	list_for_each_entry_continue(i, &rm->rsvps, list)
-		if (i->enc_id == enc->base.id)
-			return i;
-
-	return NULL;
+	return _sde_rm_get_rsvp(rm, enc, true);
 }
 
-static struct drm_connector *_sde_rm_get_connector(
-		struct drm_encoder *enc)
+static struct sde_rm_rsvp *_sde_rm_get_rsvp_cur(struct sde_rm *rm,
+		 struct drm_encoder *enc)
 {
-	struct drm_connector *conn = NULL, *conn_search;
-	struct sde_connector *c_conn = NULL;
-	struct drm_connector_list_iter conn_iter;
-
-	drm_connector_list_iter_begin(enc->dev, &conn_iter);
-	drm_for_each_connector_iter(conn_search, &conn_iter) {
-		c_conn = to_sde_connector(conn_search);
-		if (c_conn->encoder == enc) {
-			conn = conn_search;
-			break;
-		}
-	}
-	drm_connector_list_iter_end(&conn_iter);
-
-	return conn;
+	return _sde_rm_get_rsvp(rm, enc, false);
 }
 
 int sde_rm_update_topology(struct sde_rm *rm,
@@ -2312,10 +2351,7 @@ void sde_rm_release(struct sde_rm *rm, struct drm_encoder *enc, bool nxt)
 
 	mutex_lock(&rm->rm_lock);
 
-	if (nxt)
-		rsvp = _sde_rm_get_rsvp_nxt(rm, enc);
-	else
-		rsvp = _sde_rm_get_rsvp(rm, enc);
+	rsvp = _sde_rm_get_rsvp(rm, enc, nxt);
 	if (!rsvp) {
 		SDE_DEBUG("failed to find rsvp for enc %d, nxt %d",
 				enc->base.id, nxt);
@@ -2353,14 +2389,13 @@ end:
 	mutex_unlock(&rm->rm_lock);
 }
 
-static int _sde_rm_commit_rsvp(
+static void _sde_rm_commit_rsvp(
 		struct sde_rm *rm,
 		struct sde_rm_rsvp *rsvp,
 		struct drm_connector_state *conn_state)
 {
 	struct sde_rm_hw_blk *blk;
 	enum sde_hw_blk_type type;
-	int ret = 0;
 
 	/* Swap next rsvp to be the active */
 	for (type = 0; type < SDE_HW_BLK_MAX; type++) {
@@ -2375,13 +2410,9 @@ static int _sde_rm_commit_rsvp(
 		}
 	}
 
-	if (!ret) {
-		SDE_DEBUG("rsrv enc %d topology %d\n", rsvp->enc_id,
-				rsvp->topology);
-		SDE_EVT32(rsvp->enc_id, rsvp->topology);
-	}
-
-	return ret;
+	rsvp->pending = false;
+	SDE_DEBUG("rsrv enc %d topology %d\n", rsvp->enc_id, rsvp->topology);
+	SDE_EVT32(rsvp->enc_id, rsvp->topology);
 }
 
 /* call this only after rm_mutex held */
@@ -2420,7 +2451,7 @@ int sde_rm_reserve(
 	struct msm_drm_private *priv;
 	struct sde_kms *sde_kms;
 	struct msm_compression_info *comp_info;
-	int ret;
+	int ret = 0;
 
 	if (!rm || !enc || !crtc_state || !conn_state) {
 		SDE_ERROR("invalid arguments\n");
@@ -2456,7 +2487,7 @@ int sde_rm_reserve(
 
 	_sde_rm_print_rsvps(rm, SDE_RM_STAGE_BEGIN);
 
-	rsvp_cur = _sde_rm_get_rsvp(rm, enc);
+	rsvp_cur = _sde_rm_get_rsvp_cur(rm, enc);
 	rsvp_nxt = _sde_rm_get_rsvp_nxt(rm, enc);
 
 	/*
@@ -2467,11 +2498,15 @@ int sde_rm_reserve(
 	 * Poll for rsvp_nxt clear, allow the check_only commit if rsvp_nxt
 	 * gets cleared and bailout if it does not get cleared before timeout.
 	 */
-	if (test_only && rsvp_cur && rsvp_nxt) {
+	if (test_only && rsvp_nxt) {
 		rsvp_nxt = _sde_rm_poll_get_rsvp_nxt_locked(rm, enc);
+		rsvp_cur = _sde_rm_get_rsvp_cur(rm, enc);
 		if (rsvp_nxt) {
 			SDE_ERROR("poll timeout cur %d nxt %d enc %d\n",
-				rsvp_cur->seq, rsvp_nxt->seq, enc->base.id);
+				(rsvp_cur) ? rsvp_cur->seq : -1,
+				rsvp_nxt->seq, enc->base.id);
+			SDE_EVT32(enc->base.id, (rsvp_cur) ? rsvp_cur->seq : -1,
+					rsvp_nxt->seq, SDE_EVTLOG_ERROR);
 			ret = -EINVAL;
 			goto end;
 		}
@@ -2545,7 +2580,7 @@ int sde_rm_reserve(
 
 commit_rsvp:
 	_sde_rm_release_rsvp(rm, rsvp_cur, conn_state->connector);
-	ret = _sde_rm_commit_rsvp(rm, rsvp_nxt, conn_state);
+	_sde_rm_commit_rsvp(rm, rsvp_nxt, conn_state);
 
 end:
 	kfree(comp_info);
@@ -2574,7 +2609,7 @@ int sde_rm_ext_blk_create_reserve(struct sde_rm *rm,
 
 	mutex_lock(&rm->rm_lock);
 
-	rsvp = _sde_rm_get_rsvp(rm, enc);
+	rsvp = _sde_rm_get_rsvp_cur(rm, enc);
 	if (!rsvp) {
 		rsvp = kzalloc(sizeof(*rsvp), GFP_KERNEL);
 		if (!rsvp) {
@@ -2625,7 +2660,7 @@ int sde_rm_ext_blk_destroy(struct sde_rm *rm,
 
 	mutex_lock(&rm->rm_lock);
 
-	rsvp = _sde_rm_get_rsvp(rm, enc);
+	rsvp = _sde_rm_get_rsvp_cur(rm, enc);
 	if (!rsvp) {
 		ret = -ENOENT;
 		SDE_ERROR("failed to find rsvp for enc %d\n", enc->base.id);

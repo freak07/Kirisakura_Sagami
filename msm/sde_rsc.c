@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
 #define pr_fmt(fmt)	"[sde_rsc:%s:%d]: " fmt, __func__, __LINE__
@@ -310,7 +310,7 @@ static u32 sde_rsc_timer_calculate(struct sde_rsc_priv *rsc,
 
 	default_prefill_lines = (rsc->cmd_config.fps *
 		DEFAULT_PANEL_MIN_V_PREFILL) / DEFAULT_PANEL_FPS;
-	if ((state == SDE_RSC_CMD_STATE) || !rsc->cmd_config.prefill_lines)
+	if ((state != SDE_RSC_VID_STATE) || !rsc->cmd_config.prefill_lines)
 		rsc->cmd_config.prefill_lines = default_prefill_lines;
 
 	pr_debug("frame fps:%d jitter_numer:%d jitter_denom:%d vtotal:%d prefill lines:%d\n",
@@ -331,11 +331,7 @@ static u32 sde_rsc_timer_calculate(struct sde_rsc_priv *rsc,
 	line_time_ns = div_u64(line_time_ns, rsc->cmd_config.vtotal);
 	prefill_time_ns = line_time_ns * rsc->cmd_config.prefill_lines;
 
-	/* only take jitter into account for CMD mode */
-	if (state == SDE_RSC_CMD_STATE)
-		total = frame_time_ns - frame_jitter - prefill_time_ns;
-	else
-		total = frame_time_ns - prefill_time_ns;
+	total = frame_time_ns - frame_jitter - prefill_time_ns;
 
 	if (total < 0) {
 		pr_err("invalid total time period time:%llu jiter_time:%llu blanking time:%llu\n",
@@ -351,6 +347,8 @@ static u32 sde_rsc_timer_calculate(struct sde_rsc_priv *rsc,
 	pr_debug("line time:%llu prefill time ps:%llu\n",
 			line_time_ns, prefill_time_ns);
 	pr_debug("static wakeup time:%lld cxo:%u\n", total, cxo_period_ns);
+
+	SDE_EVT32(rsc->cmd_config.fps, rsc->cmd_config.vtotal, total);
 
 	pdc_backoff_time_ns = rsc_backoff_time_ns;
 	rsc_backoff_time_ns = div_u64(rsc_backoff_time_ns, cxo_period_ns);

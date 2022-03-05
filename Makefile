@@ -58,4 +58,22 @@ ifeq ($(CONFIG_ARCH_SONY_SAGAMI), y)
 	LINUXINCLUDE    += -include $(srctree)/techpack/display/config/sagamidispconf.h
 endif
 
+ifeq ($(CONFIG_ARCH_MONACO), y)
+include $(srctree)/techpack/display/config/monacodisp.conf
+endif
+
+ifeq ($(CONFIG_ARCH_MONACO), y)
+LINUXINCLUDE    += -include $(srctree)/techpack/display/config/monacodispconf.h
+endif
+
 obj-$(CONFIG_DRM_MSM) += msm/
+
+ifeq ($(CONFIG_ARCH_SDXLEMUR), y)
+include $(srctree)/techpack/display/config/sdxlemurdisp.conf
+endif
+
+ifeq ($(CONFIG_ARCH_SDXLEMUR), y)
+LINUXINCLUDE    += -include $(srctree)/techpack/display/config/sdxlemurdispconf.h
+endif
+
+obj-$(CONFIG_DRM_QPIC_DISPLAY) += tinydrm/
