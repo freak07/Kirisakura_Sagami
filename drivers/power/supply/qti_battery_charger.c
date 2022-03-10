@@ -949,6 +949,7 @@ static int usb_psy_get_prop(struct power_supply *psy,
 
 	prop_id = get_property_id(pst, prop);
 	if (prop_id < 0)
+		pr_err(" prop_id: %u\n", prop_id);
 		return prop_id;
 
 	rc = read_property_id(bcdev, pst, prop_id);
@@ -961,6 +962,8 @@ static int usb_psy_get_prop(struct power_supply *psy,
 
 	if (prop == POWER_SUPPLY_PROP_ONLINE) {
 		rc = read_property_id(bcdev, pst, USB_ADAP_TYPE);
+			pr_err("read prop USB_ADAP_TYPE, rc=%d\n",
+									rc);
 		if (rc < 0) {
 			pr_err("Failed to read prop USB_ADAP_TYPE, rc=%d\n",
 									rc);
@@ -969,7 +972,7 @@ static int usb_psy_get_prop(struct power_supply *psy,
 
 		if (pval->intval && pst->prop[USB_ADAP_TYPE] ==
 						POWER_SUPPLY_USB_TYPE_UNKNOWN) {
-			pr_debug("Since usb_type property is unknown, set online property to 0\n");
+			pr_err("Since usb_type property is unknown, set online property to 0\n");
 			pval->intval = 0;
 		}
 	}
