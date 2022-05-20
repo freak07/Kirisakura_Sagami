@@ -262,16 +262,18 @@ void rotate_reclaimable_page(struct page *page)
 	}
 }
 
-void lru_note_cost(struct lruvec *lruvec, bool file, unsigned int nr_pages)
+void lru_note_cost(struct page *page)
 {
+	struct lruvec *lruvec = mem_cgroup_page_lruvec(page, page_pgdat(page));
+
 	do {
 		unsigned long lrusize;
 
 		/* Record cost event */
-		if (file)
-			lruvec->file_cost += nr_pages;
+		if (page_is_file_lru(page))
+			lruvec->file_cost++;
 		else
-			lruvec->anon_cost += nr_pages;
+			lruvec->anon_cost++;
 
 		/*
 		 * Decay previous events
@@ -291,12 +293,6 @@ void lru_note_cost(struct lruvec *lruvec, bool file, unsigned int nr_pages)
 			lruvec->anon_cost /= 2;
 		}
 	} while ((lruvec = parent_lruvec(lruvec)));
-}
-
-void lru_note_cost_page(struct page *page)
-{
-	lru_note_cost(mem_cgroup_page_lruvec(page, page_pgdat(page)),
-		      page_is_file_lru(page), hpage_nr_pages(page));
 }
 
 static void __activate_page(struct page *page, struct lruvec *lruvec,
