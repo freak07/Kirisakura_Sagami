@@ -308,8 +308,8 @@ struct lruvec {
 	 */
 	unsigned long			anon_cost;
 	unsigned long			file_cost;
-	/* Non-resident age, driven by LRU movement */
-	atomic_long_t			nonresident_age;
+	/* Evictions & activations on the inactive file list */
+	atomic_long_t			inactive_age;
 	/* Refaults at the time of last reclaim cycle */
 	unsigned long			refaults;
 	/* Various lruvec state flags (enum lruvec_flags) */
