@@ -2491,8 +2491,10 @@ out:
 		case SCAN_FILE:
 		case SCAN_ANON:
 			/* Scan one type exclusively */
-			if ((scan_balance == SCAN_FILE) != file)
+			if ((scan_balance == SCAN_FILE) != file) {
+				lruvec_size = 0;
 				scan = 0;
+			}
 			break;
 		default:
 			/* Look ma, no brain */
