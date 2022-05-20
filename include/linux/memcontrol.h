@@ -610,7 +610,7 @@ struct mem_cgroup *mem_cgroup_get_oom_group(struct task_struct *victim,
 void mem_cgroup_print_oom_group(struct mem_cgroup *memcg);
 
 #ifdef CONFIG_MEMCG_SWAP
-extern bool cgroup_memory_noswap;
+extern int do_swap_account;
 #endif
 
 struct mem_cgroup *lock_page_memcg(struct page *page);
