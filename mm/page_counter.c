@@ -23,7 +23,11 @@ static void propagate_protected_usage(struct page_counter *c,
 		return;
 
 	if (c->min || atomic_long_read(&c->min_usage)) {
-		protected = min(usage, c->min);
+		if (usage <= c->min)
+			protected = usage;
+		else
+			protected = 0;
+
 		old_protected = atomic_long_xchg(&c->min_usage, protected);
 		delta = protected - old_protected;
 		if (delta)
@@ -31,7 +35,11 @@ static void propagate_protected_usage(struct page_counter *c,
 	}
 
 	if (c->low || atomic_long_read(&c->low_usage)) {
-		protected = min(usage, c->low);
+		if (usage <= c->low)
+			protected = usage;
+		else
+			protected = 0;
+
 		old_protected = atomic_long_xchg(&c->low_usage, protected);
 		delta = protected - old_protected;
 		if (delta)
