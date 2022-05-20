@@ -122,14 +122,14 @@ static const struct mm_walk_ops ptdump_ops = {
 	.pte_hole	= ptdump_hole,
 };
 
-void ptdump_walk_pgd(struct ptdump_state *st, struct mm_struct *mm, pgd_t *pgd)
+void ptdump_walk_pgd(struct ptdump_state *st, struct mm_struct *mm)
 {
 	const struct ptdump_range *range = st->range;
 
 	down_read(&mm->mmap_sem);
 	while (range->start != range->end) {
 		walk_page_range_novma(mm, range->start, range->end,
-				      &ptdump_ops, pgd, st);
+				      &ptdump_ops, st);
 		range++;
 	}
 	up_read(&mm->mmap_sem);
