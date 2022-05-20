@@ -4,12 +4,15 @@
 #include <linux/sched.h>
 #include <linux/hugetlb.h>
 
-static int walk_pte_range_inner(pte_t *pte, unsigned long addr,
-				unsigned long end, struct mm_walk *walk)
+static int walk_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
+			  struct mm_walk *walk)
 {
-	const struct mm_walk_ops *ops = walk->ops;
+	pte_t *pte;
 	int err = 0;
+	const struct mm_walk_ops *ops = walk->ops;
+	spinlock_t *ptl;
 
+	pte = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
 	for (;;) {
 		err = ops->pte_entry(pte, addr, addr + PAGE_SIZE, walk);
 		if (err)
@@ -19,26 +22,8 @@ static int walk_pte_range_inner(pte_t *pte, unsigned long addr,
 		addr += PAGE_SIZE;
 		pte++;
 	}
-	return err;
-}
 
-static int walk_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
-			  struct mm_walk *walk)
-{
-	pte_t *pte;
-	int err = 0;
-	spinlock_t *ptl;
-
-	if (walk->no_vma) {
-		pte = pte_offset_map(pmd, addr);
-		err = walk_pte_range_inner(pte, addr, end, walk);
-		pte_unmap(pte);
-	} else {
-		pte = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
-		err = walk_pte_range_inner(pte, addr, end, walk);
-		pte_unmap_unlock(pte, ptl);
-	}
-
+	pte_unmap_unlock(pte, ptl);
 	return err;
 }
 
@@ -394,12 +379,6 @@ int walk_page_range(struct mm_struct *mm, unsigned long start,
 	return err;
 }
 
-/*
- * Similar to walk_page_range() but can walk any page tables even if they are
- * not backed by VMAs. Because 'unusual' entries may be walked this function
- * will also not lock the PTEs for the pte_entry() callback. This is useful for
- * walking the kernel pages tables or page tables for firmware.
- */
 int walk_page_range_novma(struct mm_struct *mm, unsigned long start,
 			  unsigned long end, const struct mm_walk_ops *ops,
 			  void *private)
