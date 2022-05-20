@@ -27,7 +27,7 @@
 
 extern u64 efi_system_table;
 
-#if defined(CONFIG_PTDUMP_DEBUGFS) && defined(CONFIG_ARM64)
+#ifdef CONFIG_ARM64_PTDUMP_DEBUGFS
 #include <asm/ptdump.h>
 
 static struct ptdump_info efi_ptdump_info = {
