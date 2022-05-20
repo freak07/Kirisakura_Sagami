@@ -6,7 +6,6 @@
  */
 
 #include <linux/memcontrol.h>
-#include <linux/mm_inline.h>
 #include <linux/writeback.h>
 #include <linux/shmem_fs.h>
 #include <linux/pagemap.h>
@@ -281,7 +280,6 @@ void *workingset_eviction(struct page *page, struct mem_cgroup *target_memcg)
  */
 void workingset_refault(struct page *page, void *shadow)
 {
-	bool file = page_is_file_lru(page);
 	struct mem_cgroup *eviction_memcg;
 	struct lruvec *eviction_lruvec;
 	unsigned long refault_distance;
@@ -348,7 +346,7 @@ void workingset_refault(struct page *page, void *shadow)
 	memcg = page_memcg(page);
 	lruvec = mem_cgroup_lruvec(memcg, pgdat);
 
-	inc_lruvec_state(lruvec, WORKINGSET_REFAULT_BASE + file);
+	inc_lruvec_state(lruvec, WORKINGSET_REFAULT);
 
 	/*
 	 * Compare the distance to the existing workingset size. We
@@ -368,7 +366,7 @@ void workingset_refault(struct page *page, void *shadow)
 
 	SetPageActive(page);
 	workingset_age_nonresident(lruvec, hpage_nr_pages(page));
-	inc_lruvec_state(lruvec, WORKINGSET_ACTIVATE_BASE + file);
+	inc_lruvec_state(lruvec, WORKINGSET_ACTIVATE);
 
 	/* Page was active prior to eviction */
 	if (workingset) {
@@ -377,7 +375,7 @@ void workingset_refault(struct page *page, void *shadow)
 		spin_lock_irq(&page_pgdat(page)->lru_lock);
 		lru_note_cost_page(page);
 		spin_unlock_irq(&page_pgdat(page)->lru_lock);
-		inc_lruvec_state(lruvec, WORKINGSET_RESTORE_BASE + file);
+		inc_lruvec_state(lruvec, WORKINGSET_RESTORE);
 	}
 out:
 	rcu_read_unlock();
