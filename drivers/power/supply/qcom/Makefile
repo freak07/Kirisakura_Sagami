@@ -16,3 +16,4 @@ qcom-smb1390-charger-y += smb1390-charger-psy.o pmic-voter.o
 obj-$(CONFIG_QTI_QBG)	+= qti-qbg-main.o
 qti-qbg-main-y	+= qti-qbg.o qbg-sdam.o qbg-battery-profile.o battery-profile-loader.o
 obj-$(CONFIG_SOMC_BATTERY_CHARGER) += somc_battchg_ext_main.o pmic-voter.o
+obj-$(CONFIG_SOMC_BATTMAN) := somc_battman_dbg.o
