@@ -21,6 +21,9 @@
 #include <linux/of_gpio.h>
 #include <linux/clk/qcom.h>
 #include <linux/reset.h>
+#include <linux/reboot.h>
+#include <linux/notifier.h>
+#include <linux/kdebug.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/interconnect.h>
@@ -2000,6 +2003,11 @@ checkbme:
 
 link_fail:
 	dev->power_on = false;
+	if (dev->phy_rev >= 3)
+		ep_pcie_write_mask(dev->parf + PCIE20_PARF_LTSSM, BIT(8), 0);
+	else
+		ep_pcie_write_mask(dev->elbi + PCIE20_ELBI_SYS_CTRL, BIT(0), 0);
+
 	if (!ep_pcie_debug_keep_resource)
 		ep_pcie_pipe_clk_deinit(dev);
 pipe_clk_fail:
@@ -2018,7 +2026,6 @@ out:
 
 int ep_pcie_core_disable_endpoint(void)
 {
-	u32 val = 0;
 	unsigned long irqsave_flags;
 	struct ep_pcie_dev_t *dev = &ep_pcie_dev;
 
@@ -2048,10 +2055,6 @@ int ep_pcie_core_disable_endpoint(void)
 	}
 	dev->conf_ipa_msi_iatu = false;
 
-	val =  readl_relaxed(dev->elbi + PCIE20_ELBI_SYS_STTS);
-	EP_PCIE_DBG(dev, "PCIe V%d: LTSSM_STATE during disable:0x%x\n",
-		dev->rev, (val >> 0xC) & 0x3f);
-
 	EP_PCIE_DBG2(dev, "PCIe V%d: Set pcie_disconnect_req during D3_COLD\n",
 		     dev->rev);
 	ep_pcie_write_reg_field(dev->tcsr_perst_en,
@@ -2079,7 +2082,7 @@ int ep_pcie_core_disable_endpoint(void)
 	 * code is to toggle WAKE in such sceanrios.
 	 */
 	if (atomic_read(&dev->host_wake_pending)) {
-		EP_PCIE_DBG(dev, "PCIe V%d: %s: wake pending, init wakeup\n",
+		EP_PCIE_DBG(dev, "PCIe V%d: wake pending, init wakeup\n",
 			dev->rev);
 		ep_pcie_core_wakeup_host_internal(EP_PCIE_EVENT_PM_D3_COLD);
 	}
@@ -2321,7 +2324,7 @@ static int ep_pcie_enumeration(struct ep_pcie_dev_t *dev)
 		EP_PCIE_ERR(&ep_pcie_dev,
 			"PCIe V%d: the input handler is NULL\n",
 			ep_pcie_dev.rev);
-		return EP_PCIE_ERROR;
+		return -ENODEV;
 	}
 
 	EP_PCIE_DBG(dev,
@@ -3190,6 +3193,49 @@ int ep_pcie_core_config_db_routing(struct ep_pcie_db_config chdb_cfg,
 	return 0;
 }
 
+static int ep_pcie_core_panic_reboot_callback(struct notifier_block *nb,
+					   unsigned long reason, void *arg)
+{
+	struct ep_pcie_dev_t *dev = &ep_pcie_dev;
+	u32 mhi_syserr = BIT(2)|(0xff << 8);
+	unsigned long irqsave_flags;
+
+	if (!ep_pcie_dev.avoid_reboot_in_d3hot)
+		goto out;
+
+	/* If the device is in D3hot state, bring it to D0 */
+	spin_lock_irqsave(&dev->isr_lock, irqsave_flags);
+	if (dev->l23_ready && atomic_read(&dev->perst_deast)) {
+
+		EP_PCIE_INFO(dev,
+			"PCIe V%d got %s notification while in D3hot\n",
+			dev->rev, reason ? "reboot":"panic/die");
+
+		/* Set MHI to SYSERR state */
+		if (dev->config_mmio_init)
+			ep_pcie_write_reg(dev->mmio, PCIE20_MHISTATUS,
+						mhi_syserr);
+		/* Bring device out of D3hot */
+		ep_pcie_core_issue_inband_pme();
+	}
+	spin_unlock_irqrestore(&dev->isr_lock, irqsave_flags);
+
+out:
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block ep_pcie_core_reboot_notifier = {
+	.notifier_call	= ep_pcie_core_panic_reboot_callback,
+};
+
+static struct notifier_block ep_pcie_core_die_notifier = {
+	.notifier_call	= ep_pcie_core_panic_reboot_callback,
+};
+
+static struct notifier_block ep_pcie_core_panic_notifier = {
+	.notifier_call	= ep_pcie_core_panic_reboot_callback,
+};
+
 struct ep_pcie_hw hw_drv = {
 	.register_event	= ep_pcie_core_register_event,
 	.deregister_event = ep_pcie_core_deregister_event,
@@ -3361,6 +3407,13 @@ static int ep_pcie_probe(struct platform_device *pdev)
 		"PCIe V%d: MHI M2 autonomous is %s enabled\n",
 		ep_pcie_dev.rev, ep_pcie_dev.m2_autonomous ? "" : "not");
 
+	ep_pcie_dev.avoid_reboot_in_d3hot =
+		of_property_read_bool((&pdev->dev)->of_node,
+				"qcom,avoid-reboot-in-d3hot");
+	EP_PCIE_DBG(&ep_pcie_dev,
+	"PCIe V%d: PME during reboot/panic (in D3hot) is %s needed\n",
+	ep_pcie_dev.rev, ep_pcie_dev.avoid_reboot_in_d3hot ? "" : "not");
+
 	ret = of_property_read_u32((&pdev->dev)->of_node,
 				"qcom,mhi-soc-reset-offset",
 				&ep_pcie_dev.mhi_soc_reset_offset);
@@ -3450,8 +3503,18 @@ static int ep_pcie_probe(struct platform_device *pdev)
 		ep_pcie_dev.rev, dev_name(&(pdev->dev)));
 
 	ret = ep_pcie_enumeration(&ep_pcie_dev);
-	if (ret && !ep_pcie_debug_keep_resource)
+	if (ret == EP_PCIE_ERROR)
+		EP_PCIE_ERR(&ep_pcie_dev,
+				"PCIe V%d: Enumeration failed in probe, waiting for Perst deassert\n",
+				ep_pcie_dev.rev);
+	if (ret && !ep_pcie_debug_keep_resource & !ep_pcie_dev.perst_enum)
 		goto irq_deinit;
+
+	register_reboot_notifier(&ep_pcie_core_reboot_notifier);
+	/* Handler for wilful crash like BUG_ON */
+	register_die_notifier(&ep_pcie_core_die_notifier);
+	atomic_notifier_chain_register(&panic_notifier_list,
+				       &ep_pcie_core_panic_notifier);
 
 	qcom_edma_init(&pdev->dev);
 
@@ -3475,6 +3538,11 @@ res_failure:
 static int __exit ep_pcie_remove(struct platform_device *pdev)
 {
 	pr_debug("%s\n", __func__);
+
+	unregister_reboot_notifier(&ep_pcie_core_reboot_notifier);
+	unregister_die_notifier(&ep_pcie_core_die_notifier);
+	atomic_notifier_chain_unregister(&panic_notifier_list,
+					 &ep_pcie_core_panic_notifier);
 
 	ep_pcie_irq_deinit(&ep_pcie_dev);
 	ep_pcie_vreg_deinit(&ep_pcie_dev);

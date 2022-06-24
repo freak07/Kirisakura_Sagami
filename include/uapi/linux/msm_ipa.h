@@ -46,6 +46,8 @@
  */
 #define IPAHAL_NAT_INVALID_PROTOCOL   0xFF
 
+#define IPA_ETH_API_VER 2
+
 /**
  * commands supported by IPA driver
  */
@@ -142,6 +144,9 @@
 #define IPA_IOCTL_DEL_EoGRE_MAPPING             89
 #define IPA_IOCTL_SET_IPPT_SW_FLT               90
 #define IPA_IOCTL_FLT_MEM_PERIPHERAL_SET_PRIO_HIGH 91
+#define IPA_IOCTL_ADD_MACSEC_MAPPING            92
+#define IPA_IOCTL_DEL_MACSEC_MAPPING            93
+#define IPA_IOCTL_QUERY_CACHED_DRIVER_MSG	94
 
 /**
  * max size of the header to be inserted
@@ -300,6 +305,8 @@
 /* IPA Linux mhip instance stats structures */
 #define IPA_LNX_MHIP_INSTANCE_INFO_STRUCT_LEN (16 + 112 + 120)
 #define IPA_LNX_MHIP_INST_STATS_STRUCT_LEN (8 + 248)
+/* IPA Linux consolidated stats structure */
+#define IPA_LNX_CONSOLIDATED_STATS_STRUCT_LEN (8 + 48)
 /* IPA Linux Instance allocation info structures */
 #define IPA_LNX_EACH_INST_ALLOC_INFO_STRUCT_LEN (24 + 12 + 12 + 16)
 #define IPA_LNX_STATS_ALL_INFO_STRUCT_LEN (32 + 128 + 128 + 128)
@@ -901,7 +908,20 @@ enum ipa_ippt_sw_flt_event {
 #define IPA_IPPT_SW_FLT_EVENT_MAX IPA_IPPT_SW_FLT_EVENT_MAX
 };
 
-#define IPA_EVENT_MAX_NUM (IPA_IPPT_SW_FLT_EVENT_MAX)
+enum ipa_macsec_event {
+	IPA_MACSEC_ADD_EVENT = IPA_IPPT_SW_FLT_EVENT_MAX,
+	IPA_MACSEC_DEL_EVENT,
+	IPA_MACSEC_EVENT_MAX
+#define IPA_MACSEC_EVENT_MAX IPA_MACSEC_EVENT_MAX
+};
+
+enum ipa_done_restore_event {
+	IPA_DONE_RESTORE_EVENT = IPA_MACSEC_EVENT_MAX,
+	IPA_DONE_RESTORE_EVENT_MAX
+	#define IPA_DONE_RESTORE_EVENT_MAX IPA_DONE_RESTORE_EVENT_MAX
+};
+
+#define IPA_EVENT_MAX_NUM (IPA_DONE_RESTORE_EVENT_MAX)
 #define IPA_EVENT_MAX ((int)IPA_EVENT_MAX_NUM)
 
 /**
@@ -992,8 +1012,9 @@ enum ipa_hw_type {
 	IPA_HW_v4_11 = 20,
 	IPA_HW_v5_0 = 21,
 	IPA_HW_v5_1 = 22,
+	IPA_HW_v5_2 = 23,
 };
-#define IPA_HW_MAX (IPA_HW_v5_1 + 1)
+#define IPA_HW_MAX (IPA_HW_v5_2 + 1)
 
 #define IPA_HW_v4_0 IPA_HW_v4_0
 #define IPA_HW_v4_1 IPA_HW_v4_1
@@ -1004,6 +1025,7 @@ enum ipa_hw_type {
 #define IPA_HW_v4_11 IPA_HW_v4_11
 #define IPA_HW_v5_0 IPA_HW_v5_0
 #define IPA_HW_v5_1 IPA_HW_v5_1
+#define IPA_HW_v5_2 IPA_HW_v5_2
 
 /**
  * enum ipa_hw_feature_support - IPA HW supported feature
@@ -2720,6 +2742,7 @@ struct ipa_msg_meta {
  * struct ipa_wlan_msg - To hold information about wlan client
  * @name: name of the wlan interface
  * @mac_addr: mac address of wlan client
+ * @if_index: netdev interface index
  *
  * wlan drivers need to pass name of wlan iface and mac address of
  * wlan client along with ipa_wlan_event, whenever a wlan client is
@@ -2728,6 +2751,7 @@ struct ipa_msg_meta {
 struct ipa_wlan_msg {
 	char name[IPA_RESOURCE_NAME_MAX];
 	uint8_t mac_addr[IPA_MAC_ADDR_SIZE];
+	int16_t if_index;
 };
 
 /**
@@ -3325,6 +3349,29 @@ struct ipa_ioc_sw_flt_list_type {
 };
 
 /**
+ * struct ipa_macsec_map - mapping between ethX to macsecY
+ * @phy_name: name of the physical NIC (ethX)
+ *	- must be equal to an existing physical NIC name
+ * @macsec_name: name of the macsec NIC (macsecY)
+ */
+struct ipa_macsec_map {
+	char phy_name[IPA_RESOURCE_NAME_MAX];
+	char macsec_name[IPA_RESOURCE_NAME_MAX];
+};
+
+/**
+ * struct ipa_ioc_macsec_info - provide macsec info
+ * @ioctl_ptr: has to be typecasted to (__u64)(uintptr_t)
+ * @ioctl_data_size:
+ * Eg: For ipa_macsec_map = sizeof(ipa_macsec_map)
+ */
+struct ipa_ioc_macsec_info {
+	__u64 ioctl_ptr;
+	__u32 ioctl_data_size;
+	__u32 padding;
+};
+
+/**
  *   actual IOCTLs supported by IPA driver
  */
 #define IPA_IOC_ADD_HDR _IOWR(IPA_IOC_MAGIC, \
@@ -3604,6 +3651,8 @@ struct ipa_ioc_sw_flt_list_type {
 #define IPA_IOC_DEL_UC_ACT_ENTRY _IOWR(IPA_IOC_MAGIC, \
 				IPA_IOCTL_DEL_UC_ACT_ENTRY, \
 				__u16)
+#define IPA_IOC_QUERY_CACHED_DRIVER_MSG _IO(IPA_IOC_MAGIC,\
+				IPA_IOCTL_QUERY_CACHED_DRIVER_MSG)
 
 #define IPA_IOC_SET_SW_FLT _IOWR(IPA_IOC_MAGIC, \
 				IPA_IOCTL_SET_SW_FLT, \
@@ -3627,9 +3676,18 @@ struct ipa_ioc_sw_flt_list_type {
 #define IPA_IOC_SET_IPPT_SW_FLT _IOWR(IPA_IOC_MAGIC, \
 				IPA_IOCTL_SET_IPPT_SW_FLT, \
 				struct ipa_ioc_sw_flt_list_type)
+
 #define IPA_IOC_FLT_MEM_PERIPHERAL_SET_PRIO_HIGH _IOWR(IPA_IOC_MAGIC, \
 				IPA_IOCTL_FLT_MEM_PERIPHERAL_SET_PRIO_HIGH, \
 				enum ipa_client_type)
+
+#define IPA_IOC_ADD_MACSEC_MAPPING _IOWR(IPA_IOC_MAGIC,	\
+				IPA_IOCTL_ADD_MACSEC_MAPPING, \
+				struct ipa_ioc_macsec_info)
+#define IPA_IOC_DEL_MACSEC_MAPPING _IOWR(IPA_IOC_MAGIC, \
+				IPA_IOCTL_DEL_MACSEC_MAPPING, \
+				struct ipa_ioc_macsec_info)
+
 /*
  * unique magic number of the Tethering bridge ioctls
  */
