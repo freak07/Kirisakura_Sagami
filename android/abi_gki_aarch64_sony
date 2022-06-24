@@ -8,6 +8,7 @@
   filp_close
   filp_open
   find_vpid
+  i2c_bus_type
   input_mt_destroy_slots
   led_trigger_blink_oneshot
   nr_irqs

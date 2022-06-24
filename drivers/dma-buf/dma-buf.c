@@ -37,6 +37,7 @@ struct dma_buf_list {
 };
 
 static struct dma_buf_list db_list;
+static atomic_long_t dma_buf_global_allocated;
 
 static char *dmabuffs_dname(struct dentry *dentry, char *buffer, int buflen)
 {
@@ -111,6 +112,7 @@ static void dma_buf_release(struct dentry *dentry)
 	if (dmabuf->resv == (struct dma_resv *)&dmabuf[1])
 		dma_resv_fini(dmabuf->resv);
 
+	atomic_long_sub(dmabuf->size, &dma_buf_global_allocated);
 	WARN_ON(!list_empty(&dmabuf->attachments));
 	module_put(dmabuf->owner);
 	kfree(dmabuf->name);
@@ -619,6 +621,7 @@ struct dma_buf *dma_buf_export(const struct dma_buf_export_info *exp_info)
 	mutex_lock(&db_list.lock);
 	list_add(&dmabuf->list_node, &db_list.head);
 	mutex_unlock(&db_list.lock);
+	atomic_long_add(dmabuf->size, &dma_buf_global_allocated);
 
 	return dmabuf;
 
@@ -1301,6 +1304,15 @@ int dma_buf_get_uuid(struct dma_buf *dmabuf, uuid_t *uuid)
 	return dmabuf->ops->get_uuid(dmabuf, uuid);
 }
 EXPORT_SYMBOL_GPL(dma_buf_get_uuid);
+
+/**
+ * dma_buf_allocated_pages - Return the used nr of pages
+ * allocated for dma-buf
+ */
+long dma_buf_allocated_pages(void)
+{
+	return atomic_long_read(&dma_buf_global_allocated) >> PAGE_SHIFT;
+}
 
 #ifdef CONFIG_DEBUG_FS
 static int dma_buf_debug_show(struct seq_file *s, void *unused)

@@ -485,6 +485,9 @@ struct sdhci_host {
  * block count.
  */
 #define SDHCI_QUIRK2_USE_32BIT_BLK_CNT			(1<<18)
+#ifdef CONFIG_MMC_DDR50_MAX_LIMIT
+#define SDHCI_QUIRK2_BROKEN_SDR104_SDR50  		(1<<19)
+#endif
 
 	int irq;		/* Device IRQ */
 	void __iomem *ioaddr;	/* Mapped address */

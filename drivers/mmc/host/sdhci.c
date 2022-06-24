@@ -4319,6 +4319,12 @@ int sdhci_setup_host(struct sdhci_host *host)
 		mmc->caps &= ~(MMC_CAP_1_8V_DDR | MMC_CAP_UHS);
 	}
 
+#ifdef CONFIG_MMC_DDR50_MAX_LIMIT
+	if (host->quirks2 & SDHCI_QUIRK2_BROKEN_SDR104_SDR50) {
+		host->caps1 &= ~(SDHCI_SUPPORT_SDR104 | SDHCI_SUPPORT_SDR50);
+		mmc->caps &= ~(MMC_CAP_UHS_SDR104 | MMC_CAP_UHS_SDR50);
+	}
+#endif
 	/* Any UHS-I mode in caps implies SDR12 and SDR25 support. */
 	if (host->caps1 & (SDHCI_SUPPORT_SDR104 | SDHCI_SUPPORT_SDR50 |
 			   SDHCI_SUPPORT_DDR50))
