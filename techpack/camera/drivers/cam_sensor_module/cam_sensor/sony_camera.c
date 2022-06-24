@@ -207,6 +207,8 @@ static uint16_t sensor_num;
 static struct platform_device *camera_device;
 static struct class *camera_device_class;
 struct i2c_client *ext_cam_client = NULL;
+static bool i2c_ext_cam_driver_added = false;
+static bool i2c_qup_driver_added = false;
 
 static struct sony_camera_info camera_info[] = {
 	{
@@ -2625,6 +2627,7 @@ static int __init sony_camera_init_module(void)
 
 	sensor_num = ARRAY_SIZE(sony_camera_platform_driver);
 	i2c_add_driver(&ext_cam_i2c_driver);
+	i2c_ext_cam_driver_added = true;
 
 	for (i = 0; i < sensor_num; i++) {
 		camera_data[i].state = SONY_CAMERA_STATE_POWER_DOWN;
@@ -2656,6 +2659,7 @@ static int __init sony_camera_init_module(void)
 	}
 
 	i2c_add_driver(&sony_camera_qup_i2c_subdev_driver);
+	i2c_qup_driver_added = true;
 
 	/* register the driver */
 	dev_id = register_chrdev(0, SONY_CAMERA_DEV_NAME, &sony_camera_fops);
@@ -2719,12 +2723,25 @@ fail_platform_dev_add:
 	platform_device_put(camera_device);
 	sony_camera_platform_cleanup();
 fail_probe:
+	if (i2c_qup_driver_added) {
+		i2c_del_driver(&sony_camera_qup_i2c_subdev_driver);
+		i2c_qup_driver_added = false;
+	}
+	if (i2c_ext_cam_driver_added) {
+		i2c_del_driver(&ext_cam_i2c_driver);
+		i2c_ext_cam_driver_added = false;
+	}
 	return rc;
 }
 
 static void __exit sony_camera_exit_module(void)
 {
 	uint16_t i;
+
+	if (i2c_ext_cam_driver_added)
+		i2c_del_driver(&ext_cam_i2c_driver);
+	if (i2c_qup_driver_added)
+		i2c_del_driver(&sony_camera_qup_i2c_subdev_driver);
 
 	sony_camera_platform_cleanup();
 	for (i = 0; i < sensor_num; i++) {
