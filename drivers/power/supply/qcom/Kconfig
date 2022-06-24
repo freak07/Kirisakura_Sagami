@@ -121,4 +121,10 @@ config SOMC_BATTERY_CHARGER
        help
          Say Y to include support for SOMC Battery Charger.
          The driver supports SOMC charger used by SONY Xperia 1III/5III devices.
+         
+config SOMC_BATTMAN
+       tristate "SOMC Batteryman"
+       depends on I2C
+       help
+         Say Y to include support for Sony battman driver.
 endif
