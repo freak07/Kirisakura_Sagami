@@ -8,6 +8,7 @@
   filp_close
   filp_open
   find_vpid
+  i2c_bus_type
   input_mt_destroy_slots
   led_trigger_blink_oneshot
   nr_irqs
@@ -158,3 +159,6 @@
 
 # required by ledtrig_transient.ko
   led_set_brightness_nosleep
+
+# required by sec_touchscreen.ko
+  input_set_timestamp

@@ -128,8 +128,11 @@ KCOV_INSTRUMENT_stackleak.o := n
 $(obj)/configs.o: $(obj)/config_data.gz
 
 targets += config_data config_data.gz
-$(obj)/config_data.gz: $(obj)/config_data FORCE
+$(obj)/config_data.gz: $(obj)/config_data_somc FORCE
 	$(call if_changed,gzip)
+
+$(obj)/config_data_somc: $(obj)/config_data
+	@grep -v "CONFIG_MACH_[^ ]\+ is not set" $< > $@
 
 filechk_cat = cat $<
 

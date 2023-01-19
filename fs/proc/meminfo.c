@@ -17,6 +17,7 @@
 #ifdef CONFIG_CMA
 #include <linux/cma.h>
 #endif
+#include <linux/dma-buf.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include "internal.h"
@@ -176,6 +177,9 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	show_val_kb(m, "CmaTotal:       ", totalcma_pages);
 	show_val_kb(m, "CmaFree:        ",
 		    global_zone_page_state(NR_FREE_CMA_PAGES));
+#endif
+#ifdef CONFIG_DMA_SHARED_BUFFER
+	show_val_kb(m, "DmaBufTotal:    ", dma_buf_allocated_pages());
 #endif
 
 	if (m) {

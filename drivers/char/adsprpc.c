@@ -633,6 +633,7 @@ struct fastrpc_file {
 	struct dentry *debugfs_file;
 	struct dev_pm_qos_request *dev_pm_qos_req;
 	int qos_request;
+	struct mutex pm_qos_mutex;
 	struct mutex map_mutex;
 	struct mutex internal_map_mutex;
 	/* Identifies the device (MINOR_NUM_DEV / MINOR_NUM_SECURE_DEV) */
@@ -2978,7 +2979,8 @@ static int fastrpc_invoke_send(struct smq_invoke_ctx *ctx,
 	err = rpmsg_send(channel_ctx->rpdev->ept, (void *)msg, sizeof(*msg));
 	mutex_unlock(&channel_ctx->rpmsg_mutex);
 	trace_fastrpc_rpmsg_send(fl->cid, (uint64_t)ctx, msg->invoke.header.ctx,
-		handle, sc, msg->invoke.page.addr, msg->invoke.page.size);
+		handle, msg->invoke.header.sc, msg->invoke.page.addr,
+		msg->invoke.page.size);
 	ns = get_timestamp_in_ns();
 	fastrpc_update_txmsg_buf(channel_ctx, msg, err, ns);
  bail:
@@ -5314,6 +5316,7 @@ skip_dump_wait:
 	mutex_destroy(&fl->map_mutex);
 	mutex_destroy(&fl->internal_map_mutex);
 	kfree(fl->dev_pm_qos_req);
+	mutex_destroy(&fl->pm_qos_mutex);
 	kfree(fl);
 	return 0;
 }
@@ -5691,6 +5694,7 @@ static int fastrpc_device_open(struct inode *inode, struct file *filp)
 	filp->private_data = fl;
 	mutex_init(&fl->internal_map_mutex);
 	mutex_init(&fl->map_mutex);
+	mutex_init(&fl->pm_qos_mutex);
 	spin_lock(&me->hlock);
 	hlist_add_head(&fl->hn, &me->drivers);
 	spin_unlock(&me->hlock);
@@ -5870,6 +5874,7 @@ static int fastrpc_internal_control(struct fastrpc_file *fl,
 
 		for (ii = 0; ii < silver_core_count; ii++) {
 			cpu = me->silvercores.coreno[ii];
+			mutex_lock(&fl->pm_qos_mutex);
 			if (!fl->qos_request) {
 				err = dev_pm_qos_add_request(
 						get_cpu_device(cpu),
@@ -5881,6 +5886,7 @@ static int fastrpc_internal_control(struct fastrpc_file *fl,
 						&fl->dev_pm_qos_req[ii],
 						latency);
 			}
+			mutex_unlock(&fl->pm_qos_mutex);
 			if (err < 0) {
 				pr_warn("adsprpc: %s: %s: PM voting for cpu:%d failed, err %d, QoS update %d\n",
 					current->comm, __func__, cpu,

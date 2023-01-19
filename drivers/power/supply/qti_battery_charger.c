@@ -954,6 +954,21 @@ static int usb_psy_get_prop(struct power_supply *psy,
 	if (prop == POWER_SUPPLY_PROP_TEMP)
 		pval->intval = DIV_ROUND_CLOSEST((int)pval->intval, 10);
 
+	if (prop == POWER_SUPPLY_PROP_ONLINE) {
+		rc = read_property_id(bcdev, pst, USB_ADAP_TYPE);
+		if (rc < 0) {
+			pr_err("Failed to read prop USB_ADAP_TYPE, rc=%d\n",
+									rc);
+			return 0;
+		}
+
+		if (pval->intval && pst->prop[USB_ADAP_TYPE] ==
+						POWER_SUPPLY_USB_TYPE_UNKNOWN) {
+			pr_debug("Since usb_type property is unknown, set online property to 0\n");
+			pval->intval = 0;
+		}
+	}
+
 	return 0;
 }
 
@@ -1098,6 +1113,15 @@ static int battery_psy_get_prop(struct power_supply *psy,
 	 */
 	if (prop == POWER_SUPPLY_PROP_TIME_TO_FULL_NOW)
 		prop = POWER_SUPPLY_PROP_TIME_TO_FULL_AVG;
+
+	if (prop == POWER_SUPPLY_PROP_TIME_TO_FULL_AVG) {
+		/*
+		 * we don't really support time to full estimation
+		 * on this platform
+		 */
+		pval->intval = -1;
+		return 0;
+	}
 
 	prop_id = get_property_id(pst, prop);
 	if (prop_id < 0)
@@ -1854,9 +1878,14 @@ static int battery_chg_parse_dt(struct battery_chg_dev *bcdev)
 
 	rc = read_property_id(bcdev, pst, BATT_CHG_CTRL_LIM_MAX);
 	if (rc < 0) {
+		/* This process may fail depending on the timing.
+		 *  If this fails, the property will not be registered.
+		 *  Work around this issue by changing the return
+		 *  value from rc to -EPROBE_DEFER.
+		 */
 		pr_err("Failed to read prop BATT_CHG_CTRL_LIM_MAX, rc=%d\n",
 			rc);
-		return rc;
+		return -EPROBE_DEFER;
 	}
 
 	prev = pst->prop[BATT_CHG_CTRL_LIM_MAX];

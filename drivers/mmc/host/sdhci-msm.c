@@ -3586,7 +3586,12 @@ static const struct sdhci_pltfm_data sdhci_msm_pdata = {
 		  SDHCI_QUIRK_MULTIBLOCK_READ_ACMD12 |
 		  SDHCI_QUIRK_DATA_TIMEOUT_USES_SDCLK,
 
+#ifdef CONFIG_MMC_DDR50_MAX_LIMIT
+	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
+		   SDHCI_QUIRK2_BROKEN_SDR104_SDR50,
+#else
 	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN,
+#endif
 	.ops = &sdhci_msm_ops,
 };
 
@@ -4267,6 +4272,7 @@ static void sdhci_msm_set_caps(struct sdhci_msm_host *msm_host)
 {
 	msm_host->mmc->caps |= MMC_CAP_AGGRESSIVE_PM;
 	msm_host->mmc->caps |= MMC_CAP_WAIT_WHILE_BUSY | MMC_CAP_NEED_RSP_BUSY;
+	msm_host->mmc->caps |= MMC_CAP_CD_WAKE;
 }
 
 static int sdhci_msm_probe(struct platform_device *pdev)
@@ -4545,7 +4551,9 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 
 #if defined(CONFIG_SDC_QTI)
 	host->timeout_clk_div = 4;
+#if defined(CONFIG_MMC_ENABLE_CLK_SCALE)
 	msm_host->mmc->caps2 |= MMC_CAP2_CLK_SCALE;
+#endif
 #endif
 	sdhci_msm_setup_pm(pdev, msm_host);
 

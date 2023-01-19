@@ -580,4 +580,5 @@ static inline int dma_buf_set_destructor(struct dma_buf *dmabuf,
 	return -ENOTSUPP;
 }
 #endif
+long dma_buf_allocated_pages(void);
 #endif /* __DMA_BUF_H__ */
