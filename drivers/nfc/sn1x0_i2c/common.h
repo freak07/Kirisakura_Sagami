@@ -77,9 +77,9 @@
 
 /* Ioctls */
 /* The type should be aligned with MW HAL definitions */
-#define NFC_SET_PWR			_IOW(NFC_MAGIC, 0x01, long)
-#define ESE_SET_PWR			_IOW(NFC_MAGIC, 0x02, long)
-#define ESE_GET_PWR			_IOR(NFC_MAGIC, 0x03, long)
+#define NFC_SET_PWR			_IOW(NFC_MAGIC, 0x01, uint32_t)
+#define ESE_SET_PWR			_IOW(NFC_MAGIC, 0x02, uint32_t)
+#define ESE_GET_PWR			_IOR(NFC_MAGIC, 0x03, uint32_t)
 
 #define DTS_IRQ_GPIO_STR		"nxp,irq"
 #define DTS_VEN_GPIO_STR		"nxp,ven"
