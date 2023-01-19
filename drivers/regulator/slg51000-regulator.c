@@ -494,7 +494,7 @@ static int slg51000_i2c_probe(struct i2c_client *client,
 		}
 	}
 
-	usleep_range(10000, 10000);
+	usleep_range(10000, 11000);
 
 	i2c_set_clientdata(client, chip);
 	chip->chip_irq = client->irq;
