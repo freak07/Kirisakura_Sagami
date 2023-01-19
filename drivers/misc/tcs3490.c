@@ -1296,6 +1296,15 @@ static int tcs3490_pltf_power_on(struct tcs3490_chip *chip)
 
 	mutex_lock(&chip->lock);
 	if (chip->unpowered) {
+		if (chip->pmic_cs) {
+			rc = regulator_enable(chip->pmic_cs);
+			usleep_range(10000, 10000);
+			if (rc) {
+				dev_err(&chip->client->dev,
+					"%s: Regulator pmic_cs enable failed rc=%d\n", __func__, rc);
+				mutex_unlock(&chip->lock);
+			}
+		}
 		if (chip->vdd_supply_enable)
 			rc = regulator_enable(chip->vdd);
 		else if (chip->gpio_vdd_enable)
@@ -1318,17 +1327,6 @@ static int tcs3490_pltf_power_on(struct tcs3490_chip *chip)
 			dev_err(&chip->client->dev,
 				"%s: Regulator vio enable failed rc=%d\n", __func__, rc);
 			chip->unpowered = true;
-			mutex_unlock(&chip->lock);
-		}
-	}
-
-	if (!rc) {
-		if (chip->pmic_cs)
-			rc = regulator_enable(chip->pmic_cs);
-			usleep_range(10000, 10000);
-		if (rc) {
-			dev_err(&chip->client->dev,
-				"%s: Regulator pmic_cs enable failed rc=%d\n", __func__, rc);
 			mutex_unlock(&chip->lock);
 		}
 	}
@@ -1398,15 +1396,6 @@ static int tcs3490_pltf_power_off(struct tcs3490_chip *chip)
 			dev_info(&chip->client->dev,
 				"%s: Regulator vio disable OK", __func__);
 	}
-	if (chip->pmic_cs) {
-		rc3 = regulator_disable(chip->pmic_cs);
-		if (rc3)
-			dev_err(&chip->client->dev,
-				"%s: Regulator pmic_cs disable failed", __func__);
-		else
-			dev_info(&chip->client->dev,
-				"%s: Regulator pmic_cs disable OK", __func__);
-	}
 	if (!chip->is_register_regulator_cam_vio_notify) {
 		if (chip->vdd_supply_enable)
 			rc = regulator_disable(chip->vdd);
@@ -1415,6 +1404,15 @@ static int tcs3490_pltf_power_off(struct tcs3490_chip *chip)
 
 		if (!rc && !rc2)
 			chip->unpowered = true;
+	}
+	if (chip->pmic_cs) {
+		rc3 = regulator_disable(chip->pmic_cs);
+		if (rc3)
+			dev_err(&chip->client->dev,
+				"%s: Regulator pmic_cs disable failed", __func__);
+		else
+			dev_info(&chip->client->dev,
+				"%s: Regulator pmic_cs disable OK", __func__);
 	}
 	mutex_unlock(&chip->lock);
 
@@ -1496,6 +1494,7 @@ static int tcs3490_probe(struct i2c_client *client,
 	struct tcs3490_chip *chip;
 	int rc = 0;
 	uint32_t val_u32;
+	uint8_t val_u8;
 
 	dev_info(&client->dev, "start probing tcs3490\n");
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
@@ -1559,12 +1558,27 @@ static int tcs3490_probe(struct i2c_client *client,
 	if (rc)
 		goto pinctrl_init_failed;
 
+	rc = tcs3490_pltf_power_on(chip);
+	if (rc)
+		goto power_on_failed;
+
+	rc = tcs3490_i2c_read(chip, TCS3490_CHIPID, &val_u8);
+	tcs3490_pltf_power_off(chip);
+	if (rc) {
+		dev_err(&client->dev,
+			"%s: get device id failed rc %d", __func__, rc);
+		goto power_on_failed;
+	} else {
+		dev_info(&client->dev,
+			"%s: get device id success 0x%02x", __func__, val_u8);
+	}
+
 	chip->a_idev = input_allocate_device();
 	if (!chip->a_idev) {
 		rc = -ENOMEM;
 		dev_err(&client->dev,
 			"%s: failed to allocate input device", __func__);
-		goto allocate_device_failed;
+		goto power_on_failed;
 	}
 	chip->a_idev->name = "AMS TCS3490 Sensor";
 
@@ -1618,7 +1632,7 @@ create_group_failed:
 	input_unregister_device(chip->a_idev);
 register_device_failed:
 	input_free_device(chip->a_idev);
-allocate_device_failed:
+power_on_failed:
 	tcs3490_power_deinit(chip);
 pinctrl_init_failed:
 	kfree(chip);

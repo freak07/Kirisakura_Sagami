@@ -267,6 +267,9 @@
 #define SEC_TS_SID_GESTURE		0x14
 #define SEC_TS_GESTURE_ID_DOUBLETAP		0x00
 
+#define SEC_TS_TAP_INTERVAL	60	/* Time (ms) between two taps in a double tap */
+#define SEC_TS_TAP_DOWN			20	/* Downtime (ms) for one tap in a double tap */
+
 #define SEC_TS_COORDINATE_ACTION_NONE		0
 #define SEC_TS_COORDINATE_ACTION_PRESS		1
 #define SEC_TS_COORDINATE_ACTION_MOVE		2
@@ -383,6 +386,17 @@
 /* Grip rejection */
 #define SEC_TS_CMD_GRIP_REJECTION	0xBF
 #define SEC_TS_GRIP_REJECTION_BORDER_NUM	4
+
+#define KEY_SIDE_GESTURE	0x1c6
+#define KEY_BLACK_UI_GESTURE	0x1c7
+
+#define KEY_SIDE_GESTURE_RIGHT	0x1ca
+#define KEY_SIDE_GESTURE_LEFT	0x1cb
+
+#define ABS_MT_CUSTOM		0x3e	/* custom event */
+#define ABS_MT_GRIP		0x3f    /* grip touch */
+
+#define SW_GLOVE		0x0f  /* set = glove mode */
 
 #ifdef CONFIG_SEC_DEBUG_TSP_LOG
 #include <linux/sec_debug.h>

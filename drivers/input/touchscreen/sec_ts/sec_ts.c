@@ -707,6 +707,7 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 #endif
 	incell_pw_status status = { false, false };
 	int location;
+	ktime_t timestamp = 0;
 
 	if (ts->power_status == SEC_TS_STATE_LPM) {
 		pm_wakeup_event(&ts->client->dev, msecs_to_jiffies(500));
@@ -1109,6 +1110,12 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 				ts->scrub_x = (tdata[0] << 4) | (tdata[2] >> 4 & 0xF);
 				ts->scrub_y = (tdata[1] << 4) | (tdata[2] >> 0 & 0xF);
 
+				/* Generate a timestamp backwards in time to simulate
+				   a proper timed double tap ""\_/""""\_/"" */
+				timestamp = ktime_get();
+				/* Subtract time for the whole double tap sequence */
+				timestamp = ktime_sub_ms(timestamp, SEC_TS_TAP_INTERVAL + 2*SEC_TS_TAP_DOWN);
+
 				input_info(true, &ts->client->dev, "%s: double tap x:%d, y:%d\n",
 						__func__, ts->scrub_x, ts->scrub_y);
 				for (i = 0; i < AOD_MODE_DOUBLE_TAP; i++) {
@@ -1125,6 +1132,9 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 						break;
 					}
 
+					/* Set time for the down event */
+					input_set_timestamp(ts->input_dev, timestamp);
+
 					input_mt_slot(ts->input_dev, 0);
 					input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 1);
 					input_report_key(ts->input_dev, BTN_TOUCH, 1);
@@ -1133,10 +1143,17 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 					input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, ts->scrub_y + i);
 					input_report_abs(ts->input_dev, ABS_MT_PRESSURE, MAX_PRESSURE - i);
 					input_sync(ts->input_dev);
-					/* Release finger from the panel */
+
+					/* Release finger from the panel - adding a short delay */
+					timestamp = ktime_add_ms(timestamp, SEC_TS_TAP_DOWN);
+					input_set_timestamp(ts->input_dev, timestamp);
+
 					input_mt_slot(ts->input_dev, 0);
 					input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 0);
 					input_sync(ts->input_dev);
+
+					/* Add delay until next tap event */
+					timestamp = ktime_add_ms(timestamp, SEC_TS_TAP_INTERVAL);
 				}
 			}
 			break;
@@ -2972,6 +2989,7 @@ int sec_ts_stop_device(struct sec_ts_data *ts)
 
 	mutex_lock(&ts->device_mutex);
 
+	sec_ts_irq_wake(ts, false);
 	sec_ts_set_irq(ts, false);
 
 	ts->power_status = SEC_TS_STATE_POWER_OFF;
